@@ -12,6 +12,7 @@
     "tests/support/google-forms-fixture.ts",
     "packages/domain/src/google-forms.test.ts",
     "packages/browser/src/google-forms-browser.test.ts",
+    "packages/browser/src/google-forms-dropdown.test.ts",
     "packages/browser/src/google-forms-ai.test.ts",
     "packages/browser/src/google-session.test.ts",
     "apps/api/src/email.integration.test.ts",

@@ -10,6 +10,7 @@ import { request } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { button, panel } from './WorkspaceUI';
 import { GoogleFormSubmissionFlag } from './GoogleFormSubmissionFlag';
+import { AnswerReviewCard, answerReviewInput } from './AnswerReviewCard';
 
 const errorMessage = (error: unknown) =>
   error instanceof Error
@@ -242,26 +243,18 @@ function FormQuestionReview({
   );
   const fieldId = `google-answer-${question.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   return (
-    <div className="mt-4 rounded-lg border border-slate-200 p-4">
-      <label htmlFor={fieldId} className="font-medium">
-        {question.label}
-        {question.required ? ' *' : ' (optional)'}
-      </label>
-      <p className="mt-1 text-sm text-amber-800">{item.answer.review}</p>
-      {item.answer.confidence !== undefined && (
-        <p className="mt-1 text-xs text-slate-500">
-          Gemini confidence: {Math.round(item.answer.confidence * 100)}%
-        </p>
-      )}
-      {item.answer.value !== null && (
-        <p className="mt-1 text-xs text-slate-500">
-          Proposed answer from {item.answer.source.toLowerCase()}
-        </p>
-      )}
+    <AnswerReviewCard
+      fieldId={fieldId}
+      question={question.label}
+      required={question.required}
+      reason={item.answer.review}
+      confidence={item.answer.confidence ?? null}
+      source={item.answer.value !== null ? item.answer.source : null}
+    >
       {question.kind === 'FILE' ? (
         <select
           id={fieldId}
-          className="mt-3 w-full rounded border border-slate-300 p-2"
+          className={answerReviewInput}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => setValue(event.target.value)}
         >
@@ -299,7 +292,7 @@ function FormQuestionReview({
       ) : question.options.length ? (
         <select
           id={fieldId}
-          className="mt-3 w-full rounded border border-slate-300 p-2"
+          className={answerReviewInput}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => setValue(event.target.value)}
         >
@@ -313,7 +306,7 @@ function FormQuestionReview({
       ) : question.kind === 'PARAGRAPH' ? (
         <textarea
           id={fieldId}
-          className="mt-3 w-full rounded border border-slate-300 p-2"
+          className={answerReviewInput}
           rows={4}
           value={typeof value === 'string' ? value : ''}
           maxLength={question.maxLength}
@@ -322,7 +315,7 @@ function FormQuestionReview({
       ) : (
         <input
           id={fieldId}
-          className="mt-3 w-full rounded border border-slate-300 p-2"
+          className={answerReviewInput}
           type={
             question.kind === 'DATE'
               ? 'date'
@@ -367,7 +360,7 @@ function FormQuestionReview({
           </Link>
         )}
       </div>
-    </div>
+    </AnswerReviewCard>
   );
 }
 export function GoogleFormWorkflow({

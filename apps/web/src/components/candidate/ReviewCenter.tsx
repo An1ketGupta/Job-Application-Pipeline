@@ -1,8 +1,12 @@
 'use client';
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { request } from '@/lib/api';
 import { GoogleFormReviewInbox } from '../applications/GoogleFormWorkflow';
+import {
+  AnswerReviewCard,
+  answerReviewInput,
+} from '../applications/AnswerReviewCard';
 import type {
   CandidateDocument,
   CandidateReview,
@@ -13,11 +17,8 @@ import {
   CandidateGate,
   useCandidateRead,
   Feedback,
-  Field,
   panel,
   button,
-  primary,
-  input,
   message,
 } from './CandidateUI';
 
@@ -80,9 +81,9 @@ function ReviewForm({
   token: string;
   onSaved: (feedback: string) => void;
 }) {
+  const fieldId = useId();
   const [value, setValue] = useState(item.proposedAnswer ?? ''),
-    [documentId, setDocumentId] = useState(''),
-    [confirmed, setConfirmed] = useState(false);
+    [documentId, setDocumentId] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null),
     [success, setSuccess] = useState<string | null>(null);
@@ -100,10 +101,7 @@ function ReviewForm({
   );
   async function act(action: string) {
     if (busy) return;
-    if (!confirmed) {
-      setError('Confirm your decision before saving it.');
-      return;
-    }
+    if (!item.actions.includes(action)) return;
     const values = {
       requirementId: item.requirementId,
       version: review.version,
@@ -147,71 +145,45 @@ function ReviewForm({
     }
   }
   return (
-    <section
-      className="mt-4 rounded-lg border border-slate-200 p-4"
-      aria-label={item.question}
+    <AnswerReviewCard
+      fieldId={fieldId}
+      question={item.question}
+      reason={item.reason}
+      confidence={item.confidence ?? null}
+      source={item.proposedAnswer !== null ? item.source : null}
     >
-      <div className="flex flex-wrap justify-between gap-2">
-        <p className="text-xs font-semibold text-amber-800">
-          {item.priority === 'HIGH' ? 'High priority · ' : ''}
-          {item.type.replaceAll('_', ' ')}
-        </p>
-        <span className="text-xs text-slate-500">{item.status}</span>
-      </div>
-      <h3 className="mt-2 font-bold">{item.question}</h3>
-      <p className="mt-2 text-sm text-slate-600">{item.reason}</p>
-      <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm">
-        <p className="text-xs font-semibold text-slate-500">
-          Current proposed answer
-        </p>
-        <p className="mt-1 whitespace-pre-wrap">
-          {item.proposedAnswer ?? 'Needs your input'}
-        </p>
-        {item.source && (
-          <p className="mt-2 text-xs text-slate-500">
-            Source: {item.source.replaceAll('_', ' ')}
-          </p>
-        )}
-        {item.source === 'LLM_GENERATED' && item.confidence != null && (
-          <p className="mt-2 text-xs text-slate-500">
-            Gemini confidence: {Math.round(item.confidence * 100)}%
-          </p>
-        )}
-      </div>
-      <Feedback error={error} success={success} busy={busy} />
       {!!item.actions.length && (
         <form
-          className="mt-4 space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            void act(item.documentType ? 'SELECT_DOCUMENT' : 'ANSWER');
+            void act(
+              item.documentType
+                ? 'SELECT_DOCUMENT'
+                : value === item.proposedAnswer &&
+                    item.actions.includes('CONFIRM')
+                  ? 'CONFIRM'
+                  : 'ANSWER',
+            );
           }}
         >
-          <fieldset disabled={busy} className="space-y-3">
+          <fieldset disabled={busy}>
             {item.documentType ? (
               <>
-                <Field label="Select document">
-                  <select
-                    className={input}
-                    required
-                    value={documentId}
-                    onChange={(e) => {
-                      setDocumentId(e.target.value);
-                      setConfirmed(false);
-                    }}
-                  >
-                    <option value="">
-                      Choose an active{' '}
-                      {item.documentType.toLowerCase().replaceAll('_', ' ')}
+                <select
+                  id={fieldId}
+                  className={answerReviewInput}
+                  required
+                  value={documentId}
+                  onChange={(e) => setDocumentId(e.target.value)}
+                >
+                  <option value="">Select a document</option>
+                  {matching.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                      {d.isDefault ? ' (default)' : ''}
                     </option>
-                    {matching.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                        {d.isDefault ? ' (default)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                  ))}
+                </select>
                 {!matching.length && (
                   <p className="text-sm text-slate-500">
                     No matching documents are available.{' '}
@@ -226,18 +198,16 @@ function ReviewForm({
                 )}
               </>
             ) : (
-              <Field label="Your answer">
+              <>
                 {item.options.length ? (
                   <select
-                    className={input}
+                    id={fieldId}
+                    className={answerReviewInput}
                     required
                     value={value}
-                    onChange={(e) => {
-                      setValue(e.target.value);
-                      setConfirmed(false);
-                    }}
+                    onChange={(e) => setValue(e.target.value)}
                   >
-                    <option value="">Choose an answer</option>
+                    <option value="">Select an answer</option>
                     {item.options.map((o) => (
                       <option key={o} value={o}>
                         {o}
@@ -246,63 +216,49 @@ function ReviewForm({
                   </select>
                 ) : (
                   <textarea
-                    className={input}
+                    id={fieldId}
+                    className={answerReviewInput}
                     required
                     minLength={item.minLength}
                     maxLength={item.maxLength}
-                    rows={3}
+                    rows={4}
                     value={value}
-                    onChange={(e) => {
-                      setValue(e.target.value);
-                      setConfirmed(false);
-                    }}
+                    onChange={(e) => setValue(e.target.value)}
                   />
                 )}
-              </Field>
+              </>
             )}
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                required
-                checked={confirmed}
-                onChange={(e) => setConfirmed(e.target.checked)}
-                className="mt-1"
-              />
-              <span>I confirm this decision for this application.</span>
-            </label>
           </fieldset>
-          <div className="flex flex-wrap gap-2">
-            <button className={primary} disabled={busy || !confirmed}>
-              {item.documentType
-                ? 'Select document and recheck'
-                : 'Save answer and recheck'}
-            </button>
-            {item.actions.includes('CONFIRM') && (
-              <button
-                className={button}
-                type="button"
-                disabled={busy || !confirmed}
-                onClick={() => void act('CONFIRM')}
-              >
-                Confirm proposed answer
+          <div className="mt-3 flex flex-wrap gap-3">
+            {(item.actions.includes('ANSWER') ||
+              item.actions.includes('CONFIRM') ||
+              item.actions.includes('SELECT_DOCUMENT')) && (
+              <button className={button} type="submit" disabled={busy}>
+                Confirm answer
               </button>
             )}
             {item.actions.includes('REJECT') && (
               <button
                 className={button}
                 type="button"
-                disabled={busy || !confirmed}
+                disabled={busy}
                 onClick={() => void act('REJECT')}
               >
                 Reject proposed answer
               </button>
             )}
+            {item.documentType && (
+              <Link className={button} href="/documents">
+                Manage documents
+              </Link>
+            )}
           </div>
-          <p className="text-xs text-slate-500">
-            Approved answers are saved immediately to Verified Answers for
-            reuse.
-          </p>
         </form>
+      )}
+      {!item.actions.length && item.proposedAnswer !== null && (
+        <p className="mt-3 whitespace-pre-wrap text-sm">
+          {item.proposedAnswer}
+        </p>
       )}
       {!item.actions.length && (
         <p className="mt-3 text-xs text-slate-500">
@@ -310,7 +266,8 @@ function ReviewForm({
           Refresh for current actions.
         </p>
       )}
-    </section>
+      <Feedback error={error} success={success} busy={busy} />
+    </AnswerReviewCard>
   );
 }
 function ReviewReader({
@@ -488,8 +445,9 @@ function ReviewReader({
             </Link>
           </div>
           <p className="mt-3 text-xs text-slate-500">
-            Resolving candidate information re-runs preparation. Submission
-            requires the existing execution and security checks.
+            Confirmed answers are saved to Verified Answers for reuse. Resolving
+            candidate information re-runs preparation. Submission requires the
+            existing execution and security checks.
           </p>
         </article>
       ))}

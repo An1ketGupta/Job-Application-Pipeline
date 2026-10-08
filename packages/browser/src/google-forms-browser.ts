@@ -638,7 +638,13 @@ export class GoogleFormsBrowser {
                       .map((o) => text(o.label))
                   : Array.from(
                       element.querySelectorAll<HTMLElement>('[role="option"]'),
-                    ).map(option);
+                    )
+                      .filter(
+                        (control) =>
+                          control.getAttribute('data-value') !== '' &&
+                          control.getAttribute('aria-disabled') !== 'true',
+                      )
+                      .map(option);
           const name = element.querySelector<HTMLInputElement>(
             'input[name^="entry."],textarea[name^="entry."],select[name^="entry."],input[name="emailAddress"]',
           )?.name;
@@ -650,7 +656,7 @@ export class GoogleFormsBrowser {
             label,
             required,
             kind,
-            options,
+            options: [...new Set(options)],
             name: entry || name?.replace(/_sentinel$/, ''),
             itemId: params[0],
             accept:
@@ -875,6 +881,8 @@ export class GoogleFormsBrowser {
           (await ref.control.evaluate((e) => e.tagName === 'SELECT'))
         ) {
           await ref.control.selectOption('');
+        } else if (question.kind === 'SELECT') {
+          await this.selectCustomOption(ref.control, '');
         }
       } else {
         if (
@@ -927,16 +935,7 @@ export class GoogleFormsBrowser {
         else if (question.kind === 'SELECT') {
           if (await ref.control.evaluate((e) => e.tagName === 'SELECT'))
             await ref.control.selectOption({ label: String(answer.value) });
-          else {
-            await ref.control.click();
-            const option = this.page.getByRole('option', {
-              name: String(answer.value),
-              exact: true,
-            });
-            if ((await option.count()) !== 1)
-              throw new Error('GOOGLE_FORMS_AMBIGUOUS_OPTION');
-            await option.click();
-          }
+          else await this.selectCustomOption(ref.control, String(answer.value));
         } else if (question.kind === 'RADIO' || question.kind === 'CHECKBOX') {
           const desired = Array.isArray(answer.value)
             ? answer.value
@@ -1003,7 +1002,9 @@ export class GoogleFormsBrowser {
       if (
         question.id.startsWith('entry.') &&
         answers.find((a) => a.id === question.id)?.value === null &&
-        ['TEXT', 'PARAGRAPH', 'DATE', 'TIME', 'NUMBER'].includes(question.kind)
+        ['TEXT', 'PARAGRAPH', 'DATE', 'TIME', 'NUMBER', 'SELECT'].includes(
+          question.kind,
+        )
       )
         this.expectedEntries.set(question.id, ['']);
     }
@@ -1013,6 +1014,80 @@ export class GoogleFormsBrowser {
         (document.activeElement as HTMLElement | null)?.blur();
     });
     await this.validateFilled(answers);
+  }
+  private async selectCustomOption(control: Control, value: string) {
+    if ((await control.getAttribute('aria-expanded')) !== 'true')
+      await control.click();
+    // Google clones the collapsed options into this popup when it opens.
+    // Searching the page also finds the trigger and other questions' choices.
+    const menu = (await control.$('[jsname="V68bde"]')) ?? control;
+    await this.page
+      .waitForFunction(
+        ({ menu, value }) =>
+          Array.from(
+            menu.querySelectorAll<HTMLElement>('[role="option"]'),
+          ).some((option) => {
+            const label =
+              option.getAttribute('data-value') ??
+              option.getAttribute('aria-label') ??
+              option.textContent ??
+              '';
+            return (
+              label.trim().replace(/\s+/g, ' ') === value &&
+              option.getAttribute('aria-disabled') !== 'true' &&
+              option.getClientRects().length > 0 &&
+              getComputedStyle(option).visibility !== 'hidden'
+            );
+          }),
+        { menu, value },
+        { timeout: 10000 },
+      )
+      .catch(() => {
+        throw new Error('GOOGLE_FORMS_OPTION_NOT_FOUND');
+      });
+    const matches: Control[] = [];
+    for (const option of (await menu.$$('[role="option"]')) as Control[]) {
+      if (
+        (await option.isVisible()) &&
+        (await option.evaluate((element, value) => {
+          const label =
+            element.getAttribute('data-value') ??
+            element.getAttribute('aria-label') ??
+            element.textContent ??
+            '';
+          return (
+            label.trim().replace(/\s+/g, ' ') === value &&
+            element.getAttribute('aria-disabled') !== 'true'
+          );
+        }, value))
+      )
+        matches.push(option);
+    }
+    if (matches.length !== 1) throw new Error('GOOGLE_FORMS_AMBIGUOUS_OPTION');
+    await matches[0]!.click();
+    // The click starts Google's closing animation. Its controller commits the
+    // answer afterward; editing another field or blurring can cancel that commit.
+    await this.page
+      .waitForFunction(
+        ({ control, value }) => {
+          if (control.getAttribute('aria-expanded') === 'true') return false;
+          const selected =
+            control.querySelector(
+              '[jsname="LgbsSe"] [role="option"][aria-selected="true"]',
+            ) ?? control.querySelector('[role="option"][aria-selected="true"]');
+          const actual =
+            selected?.getAttribute('data-value') ??
+            selected?.getAttribute('aria-label') ??
+            selected?.textContent ??
+            control.getAttribute('data-value');
+          return actual?.trim().replace(/\s+/g, ' ') === value;
+        },
+        { control, value },
+        { timeout: 10000 },
+      )
+      .catch(() => {
+        throw new Error('GOOGLE_FORMS_VALUE_CHANGED');
+      });
   }
   private async upload(
     question: GoogleFormQuestion,
@@ -1285,13 +1360,14 @@ export class GoogleFormsBrowser {
         if (e instanceof HTMLSelectElement)
           return e.selectedOptions[0]?.label ?? '';
         if (e.getAttribute('role') === 'listbox') {
-          const selected = e.querySelector(
-            '[role="option"][aria-selected="true"]',
-          );
+          const selected =
+            e.querySelector(
+              '[jsname="LgbsSe"] [role="option"][aria-selected="true"]',
+            ) ?? e.querySelector('[role="option"][aria-selected="true"]');
           return (
             selected?.getAttribute('data-value') ??
             selected?.getAttribute('aria-label') ??
-            selected?.textContent?.trim() ??
+            selected?.textContent?.trim().replace(/\s+/g, ' ') ??
             e.getAttribute('data-value')
           );
         }
