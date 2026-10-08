@@ -15,6 +15,7 @@ import { InspectJobDataSchema } from './queue.js';
 export function createInspectionProcessor(
   db: PrismaClient,
   inspector = new ApplicationInspector(),
+  options: { onInspected?: (applicationId: string) => Promise<void> } = {},
 ) {
   return async (task: QueueJob) => {
     if (task.name !== 'INSPECT_APPLICATION')
@@ -150,6 +151,16 @@ export function createInspectionProcessor(
           },
           'Inspection persisted',
         );
+      if (changed) {
+        try {
+          await options.onInspected?.(applicationId);
+        } catch {
+          logger.error(
+            { event: 'inspection.preparation_queue_failed', applicationId },
+            'Inspection completed; preparation will be retried by recovery',
+          );
+        }
+      }
       return changed ? outcome.schema : undefined;
     } catch (error) {
       // A processor failure is terminal for this run. A new API request may requeue FAILED.

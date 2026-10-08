@@ -9,6 +9,7 @@
   },
   "include": [
     "packages/browser/src/greenhouse.test.ts",
-    "apps/api/src/greenhouse.test.ts"
+    "apps/api/src/greenhouse.test.ts",
+    "apps/worker/src/greenhouse-preparation.test.ts"
   ]
 }

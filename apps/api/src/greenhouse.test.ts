@@ -56,6 +56,101 @@ function row() {
   };
 }
 describe('Greenhouse application API', () => {
+  it.each(['missing', 'PENDING', 'RUNNING'])(
+    'shows preparation recovery or progress before manual answers for %s preparation',
+    async (state) => {
+      const record = row();
+      record.inspection.state = 'HUMAN_REQUIRED';
+      record.inspection.result.humanReview = {
+        required: true,
+        reasons: ['SENSITIVE_QUESTION'],
+      };
+      const application = {
+        ...record,
+        preparation:
+          state === 'missing'
+            ? null
+            : { ...record.preparation, state, result: null },
+      };
+      const app = createApp({
+        authSecret: secret,
+        db: {
+          user: { findUnique: async () => ({ id: 'owner' }) },
+          application: { findFirst: async () => application },
+        } as unknown as PrismaClient,
+      });
+      try {
+        const response = await app.inject({
+          url: '/api/v1/human-review/application',
+          headers,
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        const review = response.json().review;
+        expect(review.canStartPreparation).toBe(state === 'missing');
+        expect(review.items).toEqual([]);
+        expect(review.blockers).toHaveLength(state === 'missing' ? 1 : 0);
+        if (state === 'missing')
+          expect(review.blockers[0].recommendation).toContain(
+            'Questions needing your input will appear here',
+          );
+      } finally {
+        await app.close();
+      }
+    },
+  );
+  it('provides exact Greenhouse questions and dropdown choices for rejected AI answers in portal review', async () => {
+    const record = row();
+    record.inspection.state = 'HUMAN_REQUIRED';
+    record.inspection.result.humanReview = {
+      required: true,
+      reasons: ['SENSITIVE_QUESTION'],
+    };
+    record.preparation.state = 'HUMAN_REQUIRED';
+    record.preparation.result.overallStatus = 'HUMAN_REQUIRED';
+    const question = record.preparation.result.questions[0]!;
+    Object.assign(question, {
+      answer: 'Yes',
+      source: 'LLM_GENERATED',
+      confidence: 0.6,
+      requiresHumanReview: true,
+      reason: 'Gemini confidence 60% is below the 75% threshold.',
+    });
+    record.preparation.result.humanReviewItems = [
+      {
+        requirementId: 'q1',
+        category: 'CUSTOM_QUESTION',
+        reason: question.reason!,
+      },
+    ];
+    const app = createApp({
+      authSecret: secret,
+      db: {
+        user: { findUnique: async () => ({ id: 'owner' }) },
+        application: { findFirst: async () => record },
+      } as unknown as PrismaClient,
+    });
+    try {
+      const response = await app.inject({
+        url: '/api/v1/human-review/application',
+        headers,
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      const review = response.json().review;
+      expect(review.blockers).toEqual([]);
+      expect(review.items).toEqual([
+        expect.objectContaining({
+          question: 'Are you available for the internship?',
+          options: ['Yes', 'No'],
+          fieldType: 'SELECT',
+          confidence: 0.6,
+          reason: question.reason,
+          actions: ['ANSWER', 'CONFIRM', 'REJECT'],
+        }),
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
   it.each([true, false])(
     'shows assisted readiness with enabled=%s and never schedules automatic submission',
     async (enabled) => {

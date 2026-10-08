@@ -50,6 +50,10 @@ import {
   createPreparationProcessor,
   failStalePreparations,
 } from './preparation-processor.js';
+import {
+  requestGreenhousePreparation,
+  recoverGreenhousePreparations,
+} from './greenhouse-preparation.js';
 
 dotenv.config({ path: resolve(process.cwd(), '../../.env') });
 const config = loadConfig();
@@ -71,7 +75,10 @@ const resolveTask = createResolutionProcessor(
   db,
   new CompositeApplicationResolver(),
 );
-const inspectTask = createInspectionProcessor(db);
+const inspectTask = createInspectionProcessor(db, undefined, {
+  onInspected: (applicationId) =>
+    requestGreenhousePreparation(db, queue, applicationId),
+});
 const gmail = gmailConfigFrom(config);
 const emailTask = createEmailProcessor(
   db,
@@ -171,6 +178,7 @@ async function recover() {
   if (recovering) return;
   recovering = true;
   try {
+    await recoverGreenhousePreparations(db, queue);
     if (automaticSubmission)
       await recoverAutomaticExecutions(db, queue, automaticSince);
     await failStaleExecutions(db, new Date(Date.now() - 120_000));

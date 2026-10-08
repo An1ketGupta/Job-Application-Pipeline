@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "test:greenhouse": "vitest run packages/browser/src/greenhouse.test.ts apps/api/src/greenhouse.test.ts",
+    "test:greenhouse": "vitest run packages/browser/src/greenhouse.test.ts apps/api/src/greenhouse.test.ts apps/worker/src/greenhouse-preparation.test.ts",
     "typecheck:greenhouse": "tsc --noEmit -p tsconfig.greenhouse-tests.json",
     "test:ashby": "vitest run packages/browser/src/ashby-execution.test.ts apps/api/src/ashby-execution.test.ts apps/worker/src/automatic-execution.test.ts",
     "test:ashby:e2e": "vitest run --config vitest.integration.config.ts apps/api/src/ashby-pipeline.integration.test.ts",

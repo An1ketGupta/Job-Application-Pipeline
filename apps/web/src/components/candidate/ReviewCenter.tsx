@@ -49,13 +49,19 @@ function RecheckAnswers({
           setBusy(true);
           setError(null);
           request(
-            `/api/v1/human-review/${encodeURIComponent(review.applicationId)}/recheck`,
+            review.canStartPreparation
+              ? `/api/v1/applications/${encodeURIComponent(review.applicationId)}/prepare`
+              : `/api/v1/human-review/${encodeURIComponent(review.applicationId)}/recheck`,
             {
               method: 'POST',
-              body: JSON.stringify({
-                version: review.version,
-                key: attempt.current,
-              }),
+              ...(!review.canStartPreparation
+                ? {
+                    body: JSON.stringify({
+                      version: review.version,
+                      key: attempt.current,
+                    }),
+                  }
+                : {}),
             },
             token,
           )
@@ -64,7 +70,11 @@ function RecheckAnswers({
             .finally(() => setBusy(false));
         }}
       >
-        {busy ? 'Checking with Gemini…' : 'Recheck with Gemini'}
+        {busy
+          ? 'Checking answers…'
+          : review.canStartPreparation
+            ? 'Prepare answers'
+            : 'Recheck with Gemini'}
       </button>
       <Feedback error={error} />
     </div>
@@ -364,7 +374,7 @@ function ReviewReader({
               to the application to retry preparation.
             </p>
           )}
-          {review.canRecheckWithAi && (
+          {(review.canStartPreparation || review.canRecheckWithAi) && (
             <RecheckAnswers
               key={`${review.applicationId}-${review.version}`}
               review={review}

@@ -66,6 +66,14 @@ function reviewProjection(row: Row, aiConfigured = false) {
     canPrepareInspection(row.inspection.state, inspection.data) &&
     ['RESOLVED', 'READY'].includes(row.state) &&
     !row.executions.length;
+  const canStartPreparation =
+    inspection.success &&
+    !!row.inspection &&
+    canPrepareInspection(row.inspection.state, inspection.data) &&
+    ['RESOLVED', 'READY'].includes(row.state) &&
+    !row.plan?.requiresHumanReview &&
+    !row.executions.length &&
+    (!row.preparation || row.preparation.state === 'FAILED');
   const unsupported = z
     .object({
       unsupportedReason: z.literal('UNSUPPORTED_APPLICATION_PLATFORM'),
@@ -125,9 +133,7 @@ function reviewProjection(row: Row, aiConfigured = false) {
           const reason =
             latest?.action === 'REJECT'
               ? 'You rejected the proposed answer. A replacement is needed.'
-              : item.reason &&
-                  (answer?.source === 'LLM_GENERATED' ||
-                    preparedField?.source === 'LLM_GENERATED')
+              : item.reason
                 ? item.reason
                 : document
                   ? 'Select an active document that satisfies this application’s requirements.'
@@ -190,7 +196,10 @@ function reviewProjection(row: Row, aiConfigured = false) {
         type === 'SENSITIVE_QUESTION' &&
         inspection.success &&
         canPrepareInspection(row.inspection.state, inspection.data) &&
-        pending.length
+        (pending.length ||
+          ['PENDING', 'RUNNING', 'COMPLETED'].includes(
+            row.preparation?.state ?? '',
+          ))
       )
         continue;
       blockers.push({
@@ -214,7 +223,7 @@ function reviewProjection(row: Row, aiConfigured = false) {
                       : 'Inspection requires human attention.',
         recommendation:
           type === 'SENSITIVE_QUESTION'
-            ? 'Return to the application and prepare its required information, then answer the review items here.'
+            ? 'Check answers from your profile, résumé, and verified answers first. Questions needing your input will appear here.'
             : 'Return to the application. Candidate answers cannot clear this security or inspection gate.',
       });
     }
@@ -257,6 +266,7 @@ function reviewProjection(row: Row, aiConfigured = false) {
     version: row.preparation?.version ?? 0,
     blocked: pending.length > 0 || blockers.length > 0,
     canResumePreparation: canReview,
+    canStartPreparation,
     canRecheckWithAi: canReview && aiConfigured,
     items: pending,
     blockers,

@@ -57,6 +57,7 @@ export type CandidateReview = {
   version: number;
   blocked: boolean;
   canResumePreparation: boolean;
+  canStartPreparation?: boolean;
   canRecheckWithAi?: boolean;
   items: ReviewItem[];
   blockers: { type: string; reason: string; recommendation: string }[];
