@@ -2,7 +2,12 @@ import { z } from 'zod';
 import { isAcceptedAiAnswer } from './answer-pipeline.js';
 import { matchesAtsTarget } from './ats.js';
 import { ApplicationPlanSchema, type ApplicationPlan } from './schemas.js';
-import { ApplicationSchemaSchema } from './inspection.js';
+import {
+  ApplicationSchemaSchema,
+  applicationAnswerFields,
+  expandApplicationAnswerValues,
+} from './inspection.js';
+import { validFieldValue } from './preparation-engine.js';
 import {
   PreparedApplicationSchema,
   UserDocumentSchema,
@@ -189,6 +194,7 @@ export const ExecutionResultSchema = z
             completedAt: z.string().datetime().optional(),
             responseReceivedAt: z.string().datetime().optional(),
             responseStatus: z.number().int().min(100).max(599).optional(),
+            providerOutcome: z.enum(['CONFIRMED', 'REJECTED']).optional(),
             responseFingerprint: z
               .string()
               .regex(/^[a-f0-9]{64}$/)
@@ -429,7 +435,24 @@ export const ExecutionInputSchema = z
           message: 'Missing required document or invalid reference',
         });
     }
-    for (const field of schema.fields) {
+    for (const field of applicationAnswerFields(schema.fields)) {
+      if (
+        field.choiceGroup &&
+        values.get(field.id) != null &&
+        !validFieldValue(values.get(field.id), field)
+      )
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Invalid choice group answer',
+        });
+      if (field.choiceGroup) {
+        if (field.required && !validFieldValue(values.get(field.id), field))
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Missing mandatory choice group answer',
+          });
+        continue;
+      }
       const radioGroup =
         field.type === 'RADIO'
           ? schema.fields.filter(
@@ -532,7 +555,7 @@ export function preparedValues(
     )?.fieldId;
     if (fieldId) values.set(fieldId, q.answer);
   }
-  return values;
+  return expandApplicationAnswerValues(input.inspection.fields, values);
 }
 export interface ExecutionObserver {
   // Must durably commit before returning, especially SUBMITTING and unsafe checkpoints.

@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Queue } from 'bullmq';
-import { ExecutionModeSchema } from '@careerlift/domain';
+import {
+  ExecutionModeSchema,
+  ApplicationSchemaSchema,
+  PreparedApplicationSchema,
+} from '@careerlift/domain';
 import {
   Prisma,
   executionApplicationInclude,
@@ -12,8 +16,8 @@ import {
   type PrismaClient,
 } from '@careerlift/database';
 import {
-  DestinationPolicy,
-  ExecutionNetworkPolicy,
+  InspectionError,
+  validateExecutionTarget,
   type BrowserNetworkPolicy,
 } from '@careerlift/browser';
 import { authenticateBearer } from './auth.js';
@@ -34,6 +38,72 @@ export function registerExecutionRoutes(
   const paramsSchema = z.object({ id: z.string().min(1) });
   const startSchema = z.object({ mode: ExecutionModeSchema }).strict();
   const resumeSchema = z.object({ executionId: z.string().min(1) }).strict();
+  app.get(
+    '/api/v1/applications/:id/submission-preview',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const caller = authenticateBearer(
+        request.headers.authorization,
+        dependencies.authSecret,
+      );
+      if (!caller) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const params = paramsSchema.safeParse(request.params);
+      if (!params.success)
+        return reply.code(400).send({ error: 'INVALID_APPLICATION_ID' });
+      if (!dependencies.db)
+        return reply.code(503).send({ error: 'EXECUTION_UNAVAILABLE' });
+      const application = await dependencies.db.application.findFirst({
+        where: { id: params.data.id, userId: caller },
+        include: executionApplicationInclude,
+      });
+      if (!application)
+        return reply.code(404).send({ error: 'APPLICATION_NOT_FOUND' });
+      const schema = ApplicationSchemaSchema.safeParse(
+          application.inspection?.result,
+        ),
+        prepared = PreparedApplicationSchema.safeParse(
+          application.preparation?.result,
+        );
+      if (
+        !schema.success ||
+        !prepared.success ||
+        prepared.data.applicationId !== application.id ||
+        prepared.data.inspectionId !== application.inspection?.id
+      )
+        return reply.code(409).send({ error: 'PREPARATION_NOT_COMPLETED' });
+      return {
+        version: application.preparation!.version,
+        answers: [
+          ...prepared.data.fields
+            .filter((f) => f.value !== null)
+            .map((f) => ({
+              label:
+                schema.data.fields.find((s) => s.id === f.fieldId)?.choiceGroup
+                  ?.label ??
+                schema.data.fields.find((s) => s.id === f.fieldId)?.label ??
+                'Answer',
+              value: f.value!,
+            })),
+          ...prepared.data.questions
+            .filter((q) => q.answer !== null)
+            .map((q) => ({
+              label:
+                schema.data.questions.find((s) => s.id === q.questionId)
+                  ?.text ?? 'Question',
+              value: q.answer!,
+            })),
+        ],
+        documents: prepared.data.documents
+          .filter((d) => d.documentId)
+          .map((d) => ({
+            label: d.documentType.replaceAll('_', ' '),
+            name:
+              application.user.documents.find((s) => s.id === d.documentId)
+                ?.name ?? 'Selected document',
+          })),
+      };
+    },
+  );
   const view = (record: {
     id: string;
     applicationId: string;
@@ -135,8 +205,6 @@ export function registerExecutionRoutes(
             },
             previous,
           );
-          if (!input.inspection.executionFlow)
-            throw new Error('EXPLICIT_FLOW_REQUIRED');
           if (mode === 'REAL_EXECUTION' && !input.plan.destination.target)
             throw new Error('UNSUPPORTED_APPLICATION_PLATFORM');
           if (
@@ -145,26 +213,21 @@ export function registerExecutionRoutes(
               dependencies.executionFixtureOrigin
           )
             throw new Error('LOCAL_FIXTURE_REQUIRED');
-          const policy = new ExecutionNetworkPolicy(
-            input,
-            dependencies.policy ??
-              new DestinationPolicy(
-                mode === 'REAL_EXECUTION'
-                  ? undefined
-                  : dependencies.executionFixtureOrigin,
-              ),
-          );
-          for (const page of input.inspection.executionFlow.pages)
-            for (const url of [
-              page.url,
-              page.control.actionUrl,
-              page.expectedUrl,
-            ])
-              await policy.validateAddress(url);
+          await validateExecutionTarget(input, {
+            ...(dependencies.policy ? { policy: dependencies.policy } : {}),
+            ...(dependencies.executionFixtureOrigin
+              ? { fixtureOrigin: dependencies.executionFixtureOrigin }
+              : {}),
+          });
           if (execution && execution.inputHash !== executionInputHash(input))
             throw new Error('STALE_EXECUTION_INPUT');
-        } catch {
-          return reply.code(409).send({ error: 'EXECUTION_BLOCKED' });
+        } catch (error) {
+          return reply.code(409).send({
+            error:
+              error instanceof InspectionError
+                ? error.code
+                : 'EXECUTION_BLOCKED',
+          });
         }
         if (!execution)
           execution = await db.applicationExecution.upsert({

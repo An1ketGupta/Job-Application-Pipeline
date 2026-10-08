@@ -47,6 +47,30 @@ export function createExecutionProcessor(
     });
     if (claimed.count !== 1) return undefined;
     let current: ExecutionState = 'PREPARING';
+    let heartbeatBusy = false;
+    const heartbeat = setInterval(() => {
+      if (heartbeatBusy) return;
+      heartbeatBusy = true;
+      void db.applicationExecution
+        .updateMany({
+          where: {
+            id: executionId,
+            runId,
+            generation,
+            state: { in: ['PREPARING', 'RUNNING', 'SUBMITTING'] },
+          },
+          data: { updatedAt: new Date() },
+        })
+        .catch(() =>
+          logger.error(
+            { event: 'execution.heartbeat_failed', executionId },
+            'Execution heartbeat failed',
+          ),
+        )
+        .finally(() => {
+          heartbeatBusy = false;
+        });
+    }, 15000);
     try {
       const application = await db.application.findUniqueOrThrow({
         where: { id: applicationId },
@@ -192,7 +216,16 @@ export function createExecutionProcessor(
         data: { runId: null },
       });
       return validated;
-    } catch {
+    } catch (error) {
+      logger.error(
+        {
+          event: 'execution.worker_failed',
+          applicationId,
+          executionId,
+          errorType: error instanceof Error ? error.name : 'Unknown',
+        },
+        'Execution worker stopped; stored outcome requires inspection',
+      );
       const latest = await db.applicationExecution.findUniqueOrThrow({
         where: { id: executionId },
       });
@@ -259,6 +292,8 @@ export function createExecutionProcessor(
       throw new UnrecoverableError(
         'Execution stopped; inspect stored outcome before any continuation',
       );
+    } finally {
+      clearInterval(heartbeat);
     }
   };
 }

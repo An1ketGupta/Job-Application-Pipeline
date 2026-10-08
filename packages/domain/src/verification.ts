@@ -75,6 +75,7 @@ export const VerificationContextSchema = z
     responseReceivedAt: z.string().datetime().optional(),
     responseStatus: z.number().int().min(100).max(599).optional(),
     responseFingerprint: fingerprint.optional(),
+    providerOutcome: z.enum(['CONFIRMED', 'REJECTED']).optional(),
     // Legacy execution metadata only: always unverified, never acceptance proof.
     fixtureReceipt: z.enum(['CONFIRMED', 'REJECTED']).optional(),
   })
@@ -84,7 +85,13 @@ export const VerificationEvidenceSchema = z
   .object({
     type: EvidenceTypeSchema,
     strength: EvidenceStrengthSchema,
-    source: z.enum(['MUTATION_LEDGER', 'LOCAL_FIXTURE', 'GENERIC', 'USER']),
+    source: z.enum([
+      'MUTATION_LEDGER',
+      'LOCAL_FIXTURE',
+      'GENERIC',
+      'USER',
+      'PROVIDER_RESPONSE',
+    ]),
     capturedAt: z.string().datetime(),
     // Every observation, including weak evidence, carries the original identity.
     userId: id,
@@ -156,7 +163,19 @@ export function assertEvidenceBinding(
         context.mode === 'TEST_FIXTURE' &&
         evidence.type === 'STATUS_PAGE') ||
       (evidence.source === 'USER' &&
-        ['USER_CONFIRMED', 'USER_CONFIRMED_REJECTED'].includes(evidence.type))
+        ['USER_CONFIRMED', 'USER_CONFIRMED_REJECTED'].includes(
+          evidence.type,
+        )) ||
+      (evidence.source === 'PROVIDER_RESPONSE' &&
+        context.platform === 'ASHBY' &&
+        evidence.type === 'HTTP_RESPONSE' &&
+        context.mutationOutcome === 'FORWARDED' &&
+        context.responseStatus === 200 &&
+        !!context.responseFingerprint &&
+        evidence.responseFingerprint === context.responseFingerprint &&
+        evidence.httpStatus === 200 &&
+        !!context.providerOutcome &&
+        evidence.outcome === context.providerOutcome)
     )
   )
     throw new Error('UNSUPPORTED_STRONG_EVIDENCE');

@@ -7,6 +7,7 @@ import {
   BrowserApplicationExecutor,
   LocalDocumentStorage,
   GeminiFormAnswerProvider,
+  AshbySubmissionVerifier,
 } from '@careerlift/browser';
 import {
   createGoogleFormProcessor,
@@ -27,6 +28,10 @@ import {
   resolveDocumentRoot,
 } from '@careerlift/config';
 import { logger } from '@careerlift/logging';
+import {
+  requestAutomaticExecution,
+  recoverAutomaticExecutions,
+} from './automatic-execution.js';
 import {
   QUEUE_NAME,
   createRedisConnection,
@@ -53,7 +58,15 @@ if (!config.DATABASE_URL)
 const connection = createRedisConnection(requireRedisUrl(config));
 const db = new PrismaClient();
 const queue = createApplicationQueue(connection);
-const verifyTask = createVerificationProcessor(db);
+const automaticSince = new Date(
+  config.EXECUTION_AUTO_SUBMIT_SINCE ?? Date.now(),
+);
+const automaticSubmission =
+  config.EXECUTION_ALLOW_REAL === 'true' &&
+  config.EXECUTION_AUTO_SUBMIT === 'true';
+const verifyTask = createVerificationProcessor(db, [
+  new AshbySubmissionVerifier(),
+]);
 const resolveTask = createResolutionProcessor(
   db,
   new CompositeApplicationResolver(),
@@ -94,6 +107,12 @@ const googleForms = createGoogleFormProcessor(db, {
 const prepareTask = createPreparationProcessor(db, answerProvider, {
   confidenceThreshold: config.ANSWER_CONFIDENCE_THRESHOLD_PERCENT / 100,
   documentRoot: resolveDocumentRoot(config.EXECUTION_DOCUMENT_ROOT),
+  ...(automaticSubmission
+    ? {
+        onPrepared: (applicationId: string) =>
+          requestAutomaticExecution(db, queue, applicationId),
+      }
+    : {}),
 });
 const worker = new Worker(
   QUEUE_NAME,
@@ -149,6 +168,8 @@ async function recover() {
   if (recovering) return;
   recovering = true;
   try {
+    if (automaticSubmission)
+      await recoverAutomaticExecutions(db, queue, automaticSince);
     await failStaleExecutions(db, new Date(Date.now() - 120_000));
     await reconcileSubmissions(db, queue);
   } catch {

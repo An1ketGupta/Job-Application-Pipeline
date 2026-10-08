@@ -51,6 +51,8 @@ const ConfigSchema = z.object({
     .optional(),
   ANSWER_PROVIDER: z.enum(['NONE', 'MOCK', 'GEMINI']).default('GEMINI'),
   EXECUTION_ALLOW_REAL: z.enum(['true', 'false']).default('false'),
+  EXECUTION_AUTO_SUBMIT: z.enum(['true', 'false']).default('false'),
+  EXECUTION_AUTO_SUBMIT_SINCE: z.string().datetime().optional(),
   EXECUTION_DOCUMENT_ROOT: z.string().min(1).default('./documents'),
 });
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -77,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     GOOGLE_FORMS_GEMINI_MODEL: env.GOOGLE_FORMS_GEMINI_MODEL || undefined,
     ANSWER_CONFIDENCE_THRESHOLD_PERCENT:
       env.ANSWER_CONFIDENCE_THRESHOLD_PERCENT || undefined,
+    EXECUTION_AUTO_SUBMIT_SINCE: env.EXECUTION_AUTO_SUBMIT_SINCE || undefined,
   });
   if (!parsed.success)
     throw new Error(

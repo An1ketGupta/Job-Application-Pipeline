@@ -1,6 +1,8 @@
 'use client';
 import React, { useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { selectedChoiceLabels } from '@careerlift/domain';
+import { ReviewAnswerInput } from './ReviewAnswerInput';
 import { request } from '@/lib/api';
 import { GoogleFormReviewInbox } from '../applications/GoogleFormWorkflow';
 import {
@@ -102,6 +104,15 @@ function ReviewForm({
   async function act(action: string) {
     if (busy) return;
     if (!item.actions.includes(action)) return;
+    if (
+      action === 'ANSWER' &&
+      item.multiple &&
+      item.required !== false &&
+      !selectedChoiceLabels(value)?.length
+    ) {
+      setError('Select at least one answer.');
+      return;
+    }
     const values = {
       requirementId: item.requirementId,
       version: review.version,
@@ -148,6 +159,7 @@ function ReviewForm({
     <AnswerReviewCard
       fieldId={fieldId}
       question={item.question}
+      {...(item.required !== undefined ? { required: item.required } : {})}
       reason={item.reason}
       confidence={item.confidence ?? null}
       source={item.proposedAnswer !== null ? item.source : null}
@@ -167,6 +179,9 @@ function ReviewForm({
           }}
         >
           <fieldset disabled={busy}>
+            {item.description && (
+              <p className="mb-3 text-sm text-slate-600">{item.description}</p>
+            )}
             {item.documentType ? (
               <>
                 <select
@@ -199,33 +214,12 @@ function ReviewForm({
               </>
             ) : (
               <>
-                {item.options.length ? (
-                  <select
-                    id={fieldId}
-                    className={answerReviewInput}
-                    required
-                    value={value}
-                    onChange={(e) => setValue(e.target.value)}
-                  >
-                    <option value="">Select an answer</option>
-                    {item.options.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <textarea
-                    id={fieldId}
-                    className={answerReviewInput}
-                    required
-                    minLength={item.minLength}
-                    maxLength={item.maxLength}
-                    rows={4}
-                    value={value}
-                    onChange={(e) => setValue(e.target.value)}
-                  />
-                )}
+                <ReviewAnswerInput
+                  item={item}
+                  id={fieldId}
+                  value={value}
+                  onChange={setValue}
+                />
               </>
             )}
           </fieldset>

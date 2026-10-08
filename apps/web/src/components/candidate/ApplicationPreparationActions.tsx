@@ -25,8 +25,11 @@ export function ApplicationPreparationActions({
       'LINKEDIN',
     ].includes(application.plan.applicationType) &&
     ['RESOLVED', 'READY'].includes(application.state) &&
-    (!application.inspection || application.inspection.state === 'FAILED') &&
+    (!application.inspection ||
+      application.inspection.state === 'FAILED' ||
+      application.inspectionRetryAllowed) &&
     !application.executions.length;
+  const retryInspection = inspect && !!application.inspection;
   const prepare =
     application.preparationAllowed &&
     (!application.preparation || application.preparation.state === 'FAILED');
@@ -37,12 +40,14 @@ export function ApplicationPreparationActions({
   )
     return null;
   return (
-    <section className={panel}>
+    <section className={panel} id="inspection-actions">
       <h2 className="font-bold">Prepare your application</h2>
       <p className="mt-2 text-sm text-slate-500">
-        {inspect
-          ? 'Inspect the application form to identify its requirements.'
-          : 'Check your profile, verified answers, and documents against this application’s requirements.'}
+        {retryInspection
+          ? 'Reload the employer form and check for application fields again.'
+          : inspect
+            ? 'Inspect the application form to identify its requirements.'
+            : 'Check your profile, verified answers, and documents against this application’s requirements.'}
       </p>
       <Feedback error={error} success={success} busy={busy} />
       <button
@@ -71,7 +76,11 @@ export function ApplicationPreparationActions({
           }
         }}
       >
-        {inspect ? 'Inspect application' : 'Prepare required information'}
+        {retryInspection
+          ? 'Retry form inspection'
+          : inspect
+            ? 'Inspect application'
+            : 'Prepare required information'}
       </button>
     </section>
   );

@@ -12,6 +12,9 @@ import {
   ApplicationSchemaSchema,
   PreparedApplicationSchema,
   canPrepareInspection,
+  canRetryEmptyInspection,
+  canRepairChoiceInspection,
+  canRepairSubmissionInspection,
   type AnswerGenerationProvider,
 } from '@careerlift/domain';
 import { Prisma, type PrismaClient } from '@careerlift/database';
@@ -43,6 +46,8 @@ type Dependencies = GoogleFormDependencies & {
   policy?: BrowserNetworkPolicy;
   executionFixtureOrigin?: string;
   allowRealExecution?: boolean;
+  autoSubmit?: boolean;
+  autoSubmitSince?: string;
   source?: CareerLiftJobSource;
   resolver?: ApplicationResolverStrategy;
   documentRoot?: string;
@@ -164,15 +169,35 @@ export function createApp(dependencies: Dependencies = {}): FastifyInstance {
     const db = dependencies.db;
     const application = await db.application.findFirst({
       where: { id: params.data.id, userId: caller },
-      include: { plan: true, inspection: true },
+      include: {
+        plan: true,
+        inspection: true,
+        preparation: true,
+        executions: { select: { id: true } },
+      },
     });
     if (!application)
       return reply.code(404).send({ error: 'APPLICATION_NOT_FOUND' });
     if (!application.plan)
       return reply.code(409).send({ error: 'PLAN_NOT_FOUND' });
+    const retryEmpty =
+      !!application.inspection &&
+      canRetryEmptyInspection(application.inspection) &&
+      !application.preparation &&
+      !application.executions?.length &&
+      ['RESOLVED', 'READY'].includes(application.state);
+    const repairChoices =
+      !!application.inspection &&
+      (canRepairChoiceInspection(application.inspection) ||
+        canRepairSubmissionInspection(application.inspection)) &&
+      !['PENDING', 'RUNNING'].includes(application.preparation?.state ?? '') &&
+      !application.executions?.length &&
+      ['RESOLVED', 'READY'].includes(application.state);
     if (
       application.inspection &&
-      ['COMPLETED', 'HUMAN_REQUIRED'].includes(application.inspection.state)
+      ['COMPLETED', 'HUMAN_REQUIRED'].includes(application.inspection.state) &&
+      !retryEmpty &&
+      !repairChoices
     )
       return {
         inspectionId: application.inspection.id,
@@ -262,9 +287,32 @@ export function createApp(dependencies: Dependencies = {}): FastifyInstance {
       return reply
         .code(202)
         .send({ inspectionId: inspection.id, status: 'RUNNING' });
-    if (inspection.state === 'FAILED') {
-      await db.applicationInspection.updateMany({
-        where: { id: inspection.id, state: 'FAILED' },
+    if (inspection.state === 'FAILED' || retryEmpty || repairChoices) {
+      const update: Prisma.ApplicationInspectionUpdateManyArgs = {
+        where: {
+          id: inspection.id,
+          state: inspection.state,
+          ...(retryEmpty || repairChoices
+            ? {
+                applicationPlanId: application.plan.id,
+                errorCode: inspection.errorCode,
+                result: { equals: inspection.result as Prisma.InputJsonValue },
+                application: {
+                  state: { in: ['RESOLVED', 'READY'] },
+                  preparation: application.preparation
+                    ? {
+                        is: {
+                          id: application.preparation.id,
+                          version: application.preparation.version,
+                          state: application.preparation.state,
+                        },
+                      }
+                    : { is: null },
+                  executions: { none: {} },
+                },
+              }
+            : {}),
+        },
         data: {
           state: 'PENDING',
           errorCode: null,
@@ -274,7 +322,35 @@ export function createApp(dependencies: Dependencies = {}): FastifyInstance {
           completedAt: null,
           runId: null,
         },
-      });
+      };
+      const changed =
+        repairChoices && application.preparation
+          ? await db.$transaction(async (tx) => {
+              const changed = await tx.applicationInspection.updateMany(update);
+              if (changed.count) {
+                const preparation = await tx.applicationPreparation.updateMany({
+                  where: {
+                    id: application.preparation!.id,
+                    version: application.preparation!.version,
+                    state: application.preparation!.state,
+                  },
+                  data: {
+                    state: 'FAILED',
+                    errorCode: 'FORM_REINSPECTION_REQUIRED',
+                    result: Prisma.DbNull,
+                    reviewDecisions: [],
+                    version: { increment: 1 },
+                    runId: null,
+                  },
+                });
+                if (preparation.count !== 1)
+                  throw new Error('CONCURRENT_PREPARATION_UPDATE');
+              }
+              return changed;
+            })
+          : await db.applicationInspection.updateMany(update);
+      if ((retryEmpty || repairChoices) && changed.count !== 1)
+        return reply.code(409).send({ error: 'CONCURRENT_UPDATE' });
     }
     try {
       await dependencies.queue.add(

@@ -31,6 +31,7 @@ import {
 } from './security-controls.js';
 import { mutateBoundField, pinField } from './field-mutation.js';
 import { suspendPageScripts } from './trusted-dom.js';
+import { AshbyApplicationExecutor } from './ashby-executor.js';
 import {
   bindContract,
   contractDigest,
@@ -91,6 +92,8 @@ export class BrowserApplicationExecutor implements ApplicationExecutor {
     raw: ExecutionInput,
     observer?: ExecutionObserver,
   ): Promise<ExecutionResult> {
+    if (raw.inspection.ashbySubmission && !raw.inspection.executionFlow)
+      return new AshbyApplicationExecutor(this.options).execute(raw, observer);
     const started = Date.now();
     let result: ExecutionResult = {
       applicationId: raw.applicationId,
@@ -403,7 +406,8 @@ export class BrowserApplicationExecutor implements ApplicationExecutor {
         field: ApplicationField,
         value: string | null | undefined,
       ) => {
-        if (field.type !== 'RADIO' || value == null) return field;
+        if (field.type !== 'RADIO' || value == null || field.choiceGroup)
+          return field;
         const matches = input.inspection.fields.filter(
           (f) =>
             f.type === 'RADIO' &&
@@ -472,6 +476,15 @@ export class BrowserApplicationExecutor implements ApplicationExecutor {
           );
         await this.locateControl(page, expected.control);
         for (const current of rawPage.fields.filter((f) => f.visible)) {
+          const inspected = input.inspection.fields.find((f) =>
+            this.sameIdentity(f, current),
+          );
+          if (
+            inspected?.choiceGroup &&
+            JSON.stringify(inspected.choiceGroup) !==
+              JSON.stringify(current.choiceGroup)
+          )
+            throw new ExecutionGate('STALE_DOM_FIELD', current.id);
           if (
             !expected.fieldIds.some((id) =>
               this.sameIdentity(

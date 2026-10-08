@@ -304,23 +304,55 @@ export function ApplicationDetailsView({
         !isGoogleForm &&
         !app.humanReviewRequired &&
         app.preparation?.state === 'COMPLETED' && (
-          <p className="rounded-lg bg-indigo-50 p-4 text-sm">
-            Preparation is complete.{' '}
-            {app.executionModes?.length
-              ? 'Use the controlled local execution controls below.'
-              : 'Controlled execution requires a configured local fixture. Real execution is disabled by default.'}
-          </p>
+          <section
+            className="rounded-lg bg-indigo-50 p-4 text-sm"
+            role="status"
+          >
+            <p>
+              Preparation is complete.{' '}
+              {app.executionReadiness?.reason ??
+                (app.executionReadiness?.automatic
+                  ? 'Automatic submission is enabled. The worker will submit supported applications after all required reviews are resolved.'
+                  : app.executionModes?.includes('REAL_EXECUTION')
+                    ? 'Review the prepared answers and submit below.'
+                    : app.executionModes?.length
+                      ? 'Use the local execution controls below.'
+                      : 'Submission has not started. Check the preparation and inspection controls below.')}
+            </p>
+            {app.executionReadiness?.state === 'BLOCKED' &&
+              app.plan?.applicationUrl && (
+                <a
+                  className={`${button} mt-3`}
+                  href={app.plan.applicationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Complete on employer site
+                </a>
+              )}
+          </section>
         )}
       {app.humanReviewRequired && !isGoogleForm && (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-5">
           <h2 className="font-bold text-amber-950">
-            Action required: human review
+            {app.inspectionRetryAllowed
+              ? 'Form inspection needs another attempt'
+              : 'Action required: human review'}
           </h2>
           <p className="mt-2 text-sm text-amber-900">
-            The agent needs your input before it can continue.
+            {app.inspectionRetryAllowed
+              ? 'Reload the employer form to check for its application fields.'
+              : 'The agent needs your input before it can continue.'}
           </p>
-          <Link href="#review" className={`${button} mt-4`}>
-            Open Review
+          <Link
+            href={
+              app.inspectionRetryAllowed ? '#inspection-actions' : '#review'
+            }
+            className={`${button} mt-4`}
+          >
+            {app.inspectionRetryAllowed
+              ? 'View inspection controls'
+              : 'Open Review'}
           </Link>
         </section>
       )}
@@ -456,7 +488,12 @@ export function ApplicationDetailsView({
             <p className="mt-2 text-sm">
               {verification?.state === 'REJECTED'
                 ? verification.summary
-                : 'The agent could not complete the application. An execution failure does not establish external rejection.'}
+                : !app.execution
+                  ? app.inspection &&
+                    ['FAILED', 'HUMAN_REQUIRED'].includes(app.inspection.state)
+                    ? 'Form inspection stopped before answer preparation or submission.'
+                    : 'Application preparation needs attention. Submission has not started.'
+                  : 'The agent could not complete the application. An execution failure does not establish external rejection.'}
             </p>
             {issues.map((text, i) => (
               <p key={i} className="mt-2 text-sm">
@@ -478,16 +515,18 @@ export function ApplicationDetailsView({
             ))}
           </ul>
           <p className="mt-4 text-sm text-slate-500">
-            This application is blocked until the required information or
-            security issue is reviewed. Candidate answers can resume
-            preparation; execution remains subject to its existing checks.
+            {app.inspectionRetryAllowed
+              ? 'Use Retry form inspection above to reload the employer form and detect its fields.'
+              : 'This application is blocked until the required information or security issue is reviewed. Candidate answers can resume preparation; execution remains subject to its existing checks.'}
           </p>
-          <Link
-            className={`${button} mt-4`}
-            href={`/review/${encodeURIComponent(app.id)}`}
-          >
-            Review required information
-          </Link>
+          {!app.inspectionRetryAllowed && (
+            <Link
+              className={`${button} mt-4`}
+              href={`/review/${encodeURIComponent(app.id)}`}
+            >
+              Review required information
+            </Link>
+          )}
         </section>
       )}
       {!isGoogleForm && (

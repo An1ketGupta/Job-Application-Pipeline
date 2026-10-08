@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import type { ApplicationField, ApplicationSchema } from './inspection.js';
-import { ApplicationSchemaSchema, SemanticTypeSchema } from './inspection.js';
+import {
+  ApplicationSchemaSchema,
+  SemanticTypeSchema,
+  applicationAnswerFields,
+  selectedChoiceLabels,
+} from './inspection.js';
 import { JobSchema, type Job } from './schemas.js';
 import {
   resolveCandidateAnswers,
@@ -319,6 +324,22 @@ export function validFieldValue(
 ): value is string {
   if (!value?.trim()) return false;
   if (!field) return true;
+  if (field.choiceGroup && field.type === 'CHECKBOX') {
+    const selected = selectedChoiceLabels(value);
+    return Boolean(
+      selected &&
+      (!field.required || selected.length > 0) &&
+      selected.every(
+        (option) => field.options.filter((o) => o === option).length === 1,
+      ),
+    );
+  }
+  if (field.choiceGroup && field.type === 'RADIO')
+    return field.options.filter((option) => option === value).length === 1;
+  if (field.type === 'CHECKBOX' && !field.choiceGroup)
+    return (
+      ['true', 'false'].includes(value) && (!field.required || value === 'true')
+    );
   if (
     (field.maxLength && value.length > field.maxLength) ||
     (field.minLength && value.length < field.minLength) ||
@@ -376,6 +397,7 @@ export class PreparationEngine {
       questions: PreparedApplication['questions'] = [],
       documents: PreparedApplication['documents'] = [],
       humanReviewItems: PreparedApplication['humanReviewItems'] = [];
+    const answerFields = applicationAnswerFields(input.schema.fields);
     const questionFieldIds = new Set(
       input.schema.questions.map((q) => q.fieldId),
     );
@@ -399,11 +421,14 @@ export class PreparationEngine {
           )
         : [];
     };
-    for (const field of input.schema.fields) {
+    for (const field of answerFields) {
       if (
         questionFieldIds.has(field.id) ||
         documentFieldIds.has(field.id) ||
-        field.type === 'FILE'
+        field.type === 'FILE' ||
+        !field.visible ||
+        field.disabled ||
+        field.readonly
       )
         continue;
       const classification = classifyField(field),
@@ -470,7 +495,7 @@ export class PreparationEngine {
         question.semanticType,
         question.sensitivity,
       );
-      const field = input.schema.fields.find((f) => f.id === question.fieldId);
+      const field = answerFields.find((f) => f.id === question.fieldId);
       const matches = matchesFor(question.text, category);
       const verified = matches.length === 1 ? matches[0] : undefined;
       const decision = decisionFor(question.id);
@@ -607,10 +632,9 @@ export class PreparationEngine {
     if (this.provider?.generateAnswers) {
       const requests: CandidateQuestion[] = [];
       for (const field of fields) {
-        const control = input.schema.fields.find(
-          (f) => f.id === field.fieldId,
-        )!;
+        const control = answerFields.find((f) => f.id === field.fieldId)!;
         if (
+          !control.required ||
           field.value ||
           decisionFor(field.fieldId)?.action === 'REJECT' ||
           matchesFor(
@@ -647,10 +671,9 @@ export class PreparationEngine {
         const inspected = input.schema.questions.find(
           (q) => q.id === question.questionId,
         )!;
-        const control = input.schema.fields.find(
-          (f) => f.id === inspected.fieldId,
-        );
+        const control = answerFields.find((f) => f.id === inspected.fieldId);
         if (
+          (!inspected.required && inspected.sensitivity === 'NONE') ||
           question.answer ||
           decisionFor(question.questionId)?.action === 'REJECT' ||
           matchesFor(inspected.text, question.category).length > 1
@@ -698,7 +721,7 @@ export class PreparationEngine {
           );
           return validFieldValue(
             value,
-            input.schema.fields.find(
+            answerFields.find(
               (f) => f.id === (inspected?.fieldId ?? question.id),
             ),
           );

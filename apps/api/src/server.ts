@@ -73,6 +73,10 @@ const app = createApp({
       }
     : {}),
   allowRealExecution: config.EXECUTION_ALLOW_REAL === 'true',
+  autoSubmit: config.EXECUTION_AUTO_SUBMIT === 'true',
+  ...(config.EXECUTION_AUTO_SUBMIT_SINCE
+    ? { autoSubmitSince: config.EXECUTION_AUTO_SUBMIT_SINCE }
+    : {}),
   ...(db ? { db } : {}),
   ...(queue ? { queue } : {}),
   authSecret,

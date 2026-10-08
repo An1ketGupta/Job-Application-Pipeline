@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@careerlift/domain": "workspace:*",
+    "graphql": "^16.14.2",
     "pdfjs-dist": "^6.4.299",
     "playwright": "^1.56.0",
     "zod": "3.24.4"

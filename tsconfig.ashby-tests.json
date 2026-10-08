@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "packages/browser/src/ashby-execution.test.ts",
+    "apps/api/src/ashby-execution.test.ts",
+    "apps/api/src/ashby-pipeline.integration.test.ts",
+    "apps/worker/src/automatic-execution.test.ts"
+  ]
+}

@@ -11,6 +11,12 @@ import { extractPage, classifyPage } from './extract.js';
 import { detectPlatform } from './platform.js';
 import { InspectionError, validateRedirectChain } from './policy.js';
 import { BrowserSessionManager } from './session.js';
+import { waitForFormRendering } from './form-readiness.js';
+import { captureAshbySubmission } from './ashby-form.js';
+import {
+  isAshbyReadRequest,
+  isOptionalAshbyTelemetry,
+} from './ashby-read-request.js';
 
 export interface InspectionOutcome {
   status: 'COMPLETED' | 'HUMAN_REQUIRED' | 'FAILED';
@@ -23,6 +29,7 @@ export class ApplicationInspector {
   constructor(
     private readonly sessions = new BrowserSessionManager(),
     private readonly fixtureTargets: ReadonlyMap<string, string> = new Map(),
+    private readonly renderTimeoutMs = 10000,
   ) {}
   async inspect(
     planInput: ApplicationPlan,
@@ -77,8 +84,42 @@ export class ApplicationInspector {
                 );
             }
           : undefined,
+        (url, method, body, contentType) =>
+          isOptionalAshbyTelemetry(sourceUrl, url, method)
+            ? 'BLOCK_OPTIONAL'
+            : isAshbyReadRequest(
+                target?.fixtureSourceUrl ?? sourceUrl,
+                url,
+                method,
+                body,
+                contentType,
+                target?.fixtureSourceUrl
+                  ? new URL(sourceUrl).origin
+                  : undefined,
+              ),
       );
       const page = session.page;
+      let ashbyPosting: unknown;
+      const providerReads: Promise<void>[] = [];
+      page.on('response', (providerResponse) => {
+        const url = new URL(providerResponse.url());
+        if (
+          target?.platform === 'ASHBY' &&
+          url.origin === new URL(sourceUrl).origin &&
+          url.pathname === '/api/non-user-graphql' &&
+          url.searchParams.get('op') === 'ApiJobPosting'
+        ) {
+          providerReads.push(
+            providerResponse
+              .json()
+              .then((data) => {
+                if (data.data?.jobPosting?.id === target.externalJobId)
+                  ashbyPosting = data.data.jobPosting;
+              })
+              .catch(() => {}),
+          );
+        }
+      });
       page.on('response', (redirectResponse) => {
         addressChecks.push(
           redirectResponse
@@ -168,23 +209,26 @@ export class ApplicationInspector {
         request = request.redirectedFrom()!;
       }
       validateRedirectChain(chain, this.sessions.networkPolicy);
+      await waitForFormRendering(page, this.renderTimeoutMs);
       const finalUrl = page.url();
       this.sessions.networkPolicy.validateNavigation(finalUrl);
+      let extractionTimer: ReturnType<typeof setTimeout> | undefined;
       const raw = await Promise.race([
         extractPage(page),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new InspectionError(
-                  'INSPECTION_TIMEOUT',
-                  'Page inspection timed out',
+        new Promise<never>(
+          (_, reject) =>
+            (extractionTimer = setTimeout(
+              () =>
+                reject(
+                  new InspectionError(
+                    'INSPECTION_TIMEOUT',
+                    'Page inspection timed out',
+                  ),
                 ),
-              ),
-            10000,
-          ),
+              10000,
+            )),
         ),
-      ]);
+      ]).finally(() => clearTimeout(extractionTimer));
       await Promise.all(addressChecks);
       if (unsafeConnection) throw unsafeConnection;
       await session.securityCheck();
@@ -252,17 +296,28 @@ export class ApplicationInspector {
         ...classified,
         forms: raw.forms,
         ...(raw.executionFlow ? { executionFlow: raw.executionFlow } : {}),
+        ...(await (async () => {
+          await Promise.all(providerReads);
+          const submission = captureAshbySubmission(ashbyPosting, raw.fields);
+          return submission ? { ashbySubmission: submission } : {};
+        })()),
         confidence: detected.confidence,
         inspectionMetadata: {
           inspectedAt: new Date().toISOString(),
           durationMs: Date.now() - started,
           visibleTextExcerpt: raw.visibleText,
           fieldCount: classified.fields.length,
+          formParserVersion: 3,
         },
       });
       return {
         status: schema.humanReview.required ? 'HUMAN_REQUIRED' : 'COMPLETED',
         schema,
+        ...(schema.humanReview.reasons.includes(
+          'INTERACTIVE_DISCOVERY_REQUIRED',
+        )
+          ? { errorCode: 'FORM_FIELDS_NOT_FOUND' }
+          : {}),
       };
     } catch (error) {
       const blocked = this.sessions.takeBlockedNavigation();

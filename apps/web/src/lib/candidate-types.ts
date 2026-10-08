@@ -41,6 +41,9 @@ export type ReviewItem = {
   minLength: number;
   maxLength: number;
   fieldType: string;
+  required?: boolean;
+  description?: string | null;
+  multiple?: boolean;
   documentType: string | null;
   acceptedFileTypes: string[];
   status: string;

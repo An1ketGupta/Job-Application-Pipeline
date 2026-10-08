@@ -27,7 +27,11 @@ import { PrepareJobDataSchema } from './queue.js';
 export function createPreparationProcessor(
   db: PrismaClient,
   provider?: AnswerGenerationProvider,
-  options: { confidenceThreshold?: number; documentRoot?: string } = {},
+  options: {
+    confidenceThreshold?: number;
+    documentRoot?: string;
+    onPrepared?: (applicationId: string) => Promise<void>;
+  } = {},
 ) {
   return async (task: QueueJob) => {
     if (task.name !== 'PREPARE_APPLICATION')
@@ -297,6 +301,16 @@ export function createPreparationProcessor(
           },
           'Preparation persisted',
         );
+      if (updated.count && result.overallStatus === 'COMPLETED') {
+        try {
+          await options.onPrepared?.(applicationId);
+        } catch {
+          logger.error(
+            { event: 'execution.auto_queue_failed', applicationId },
+            'Automatic submission will be retried by recovery',
+          );
+        }
+      }
       return updated.count ? result : undefined;
     } catch (error) {
       await db.applicationPreparation.updateMany({

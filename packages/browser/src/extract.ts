@@ -1,4 +1,5 @@
 import type { ApplicationField, ApplicationSchema } from '@careerlift/domain';
+import { applicationAnswerFields } from '@careerlift/domain';
 import type { Page } from 'playwright';
 import { createHash } from 'node:crypto';
 
@@ -38,10 +39,44 @@ export async function extractPage(page: Page): Promise<RawPageRepresentation> {
     const formIds = new Map(
       forms.map((form, index) => [form, `form-${index + 1}`]),
     );
+    const groupIds = new Map<Element, string>();
+    const labelledBy = (element: Element) =>
+      bounded(
+        (element.getAttribute('aria-labelledby') ?? '')
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent ?? '')
+          .join(' '),
+      );
     const fields = elements.map((element, index) => {
       const input = element instanceof HTMLInputElement ? element : undefined;
       const kind = input?.type?.toLowerCase() ?? element.tagName.toLowerCase();
       const role = element.getAttribute('role');
+      const container = element.closest(
+        'fieldset,[role="radiogroup"],[role="group"],.ashby-application-form-field-entry',
+      );
+      const heading = container?.querySelector(
+        ':scope > legend,:scope > .ashby-application-form-question-title',
+      );
+      const groupLabel = container
+        ? labelledBy(container) ||
+          bounded(container.getAttribute('aria-label')) ||
+          bounded(heading?.textContent)
+        : '';
+      const questionRequired =
+        container?.hasAttribute('required') ||
+        container?.getAttribute('aria-required') === 'true' ||
+        Boolean(
+          heading &&
+          (/\*\s*$/.test(heading.textContent ?? '') ||
+            (heading.classList.contains(
+              'ashby-application-form-question-title',
+            ) &&
+              /(?:^|\s)_required_/.test(heading.className))),
+        );
+      const description = bounded(
+        container?.querySelector('.ashby-application-form-question-description')
+          ?.textContent,
+      );
       const type: ApplicationField['type'] =
         kind === 'email'
           ? 'EMAIL'
@@ -76,11 +111,31 @@ export async function extractPage(page: Page): Promise<RawPageRepresentation> {
             : '') ||
           element.closest('label')?.textContent ||
           element.getAttribute('aria-label') ||
+          labelledBy(element) ||
           element.getAttribute('placeholder') ||
           element.getAttribute('name') ||
           '',
         1000,
       );
+      const isChoice = type === 'RADIO' || type === 'CHECKBOX';
+      const groupControls = container
+        ? Array.from(
+            container.querySelectorAll<HTMLElement>(
+              'input[type="radio"],input[type="checkbox"],[role="radio"],[role="checkbox"]',
+            ),
+          ).filter(
+            (control) =>
+              control.closest(
+                'fieldset,[role="radiogroup"],[role="group"],.ashby-application-form-field-entry',
+              ) === container,
+          )
+        : [];
+      const group =
+        isChoice && container && groupLabel && groupControls.length > 0
+          ? container
+          : undefined;
+      if (group && !groupIds.has(group))
+        groupIds.set(group, `choice-group-${groupIds.size + 1}`);
       const form = (element as HTMLInputElement).form;
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -103,6 +158,35 @@ export async function extractPage(page: Page): Promise<RawPageRepresentation> {
           ? { name: bounded(element.getAttribute('name'), 1000) }
           : {}),
         label,
+        ...(groupLabel &&
+        (isChoice ||
+          container?.classList.contains('ashby-application-form-field-entry'))
+          ? {
+              questionLabel: groupLabel.replace(/\s*\*\s*$/, ''),
+              questionRequired: Boolean(
+                questionRequired ||
+                element.hasAttribute('required') ||
+                element.getAttribute('aria-required') === 'true',
+              ),
+            }
+          : {}),
+        ...(description ? { description } : {}),
+        ...(group
+          ? {
+              choiceGroup: {
+                id: groupIds.get(group)!,
+                label: groupLabel.replace(/\s*\*\s*$/, ''),
+                required: Boolean(
+                  questionRequired ||
+                  groupControls.some(
+                    (c) =>
+                      c.hasAttribute('required') ||
+                      c.getAttribute('aria-required') === 'true',
+                  ),
+                ),
+              },
+            }
+          : {}),
         type,
         required:
           element.hasAttribute('required') ||
@@ -346,6 +430,12 @@ export function classifyPage(raw: RawPageRepresentation) {
     ...(field.domId ? { domId: field.domId } : {}),
     ...(field.name ? { name: field.name } : {}),
     label: field.label,
+    ...(field.questionLabel ? { questionLabel: field.questionLabel } : {}),
+    ...(field.questionRequired !== undefined
+      ? { questionRequired: field.questionRequired }
+      : {}),
+    ...(field.description ? { description: field.description } : {}),
+    ...(field.choiceGroup ? { choiceGroup: field.choiceGroup } : {}),
     type: field.type,
     required: field.required,
     visible: field.visible,
@@ -371,7 +461,7 @@ export function classifyPage(raw: RawPageRepresentation) {
     ...(field.selector ? { selector: field.selector } : {}),
     source: field.source,
   }));
-  for (const rawField of raw.fields) {
+  for (const rawField of applicationAnswerFields(raw.fields)) {
     const label = `${rawField.label} ${rawField.name ?? ''}`.toLowerCase();
     if (rawField.type === 'FILE') {
       const type = /resume|cv\b/.test(label)
@@ -389,8 +479,9 @@ export function classifyPage(raw: RawPageRepresentation) {
         required: rawField.required,
         fieldId: rawField.id,
         acceptedFileTypes:
-          rawField.accept
-            ?.split(',')
+          raw.fields
+            .find((f) => f.id === rawField.id)
+            ?.accept?.split(',')
             .map((s) => s.trim())
             .filter(Boolean)
             .slice(0, 30) ?? [],
@@ -410,6 +501,7 @@ export function classifyPage(raw: RawPageRepresentation) {
     const question =
       !normalProfile &&
       (sensitive ||
+        Boolean(rawField.choiceGroup) ||
         rawField.type === 'TEXTAREA' ||
         /\?|why |describe|tell us|experience|how many|are you|do you/i.test(
           rawField.label,

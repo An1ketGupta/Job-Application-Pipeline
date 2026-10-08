@@ -136,6 +136,16 @@ export async function request<T>(
       EXPLICIT_CONFIRMATION_REQUIRED:
         'Explicitly confirm your answer before saving.',
       REAL_EXECUTION_DISABLED: 'Real execution is disabled.',
+      EXPLICIT_FLOW_REQUIRED:
+        'Retry form inspection to identify the submission flow.',
+      CAPTCHA:
+        'The employer requires reCAPTCHA. Complete this application on the employer site.',
+      ASHBY_SURVEY_REVIEW_REQUIRED:
+        'Complete the employer survey forms on the employer site.',
+      ASHBY_UNSUPPORTED_FIELD:
+        'This employer form requires a browser interaction. Complete it on the employer site.',
+      ASHBY_FORM_CHANGED:
+        'The employer form changed. Inspect and prepare it again before submission.',
       LOCAL_FIXTURE_REQUIRED:
         'Controlled execution requires an explicitly configured local test fixture.',
       EXECUTION_BLOCKED:

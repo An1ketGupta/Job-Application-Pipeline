@@ -1,5 +1,6 @@
 import {
   ApplicationSchemaSchema,
+  applicationAnswerFields,
   ExecutionResultSchema,
   PreparedApplicationSchema,
 } from '@careerlift/domain';
@@ -26,7 +27,7 @@ export function safeInspection(raw: unknown) {
   const schema = parsed.data;
   return {
     title: schema.title,
-    fields: schema.fields.map((f) => ({
+    fields: applicationAnswerFields(schema.fields).map((f) => ({
       id: f.id,
       label: f.label,
       type: f.type,

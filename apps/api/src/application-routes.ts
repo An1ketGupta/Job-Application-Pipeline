@@ -9,6 +9,10 @@ import {
   PreparedApplicationSchema,
   ApplicationSchemaSchema,
   canPrepareInspection,
+  canRetryEmptyInspection,
+  canRepairChoiceInspection,
+  canRepairSubmissionInspection,
+  ashbySubmissionBlocker,
   ApplicationPlanSchema,
 } from '@careerlift/domain';
 import { authenticateBearer } from './auth.js';
@@ -92,7 +96,9 @@ const summarySelect = {
       createdAt: true,
     },
   },
-  inspection: { select: stageSelect },
+  inspection: {
+    select: { ...stageSelect, id: true, applicationPlanId: true, result: true },
+  },
   preparation: { select: stageSelect },
   emailMessage: { select: { state: true, updatedAt: true, sentAt: true } },
   googleFormRun: { select: googleFormRunSelect },
@@ -123,7 +129,7 @@ const summarySelect = {
 } satisfies Prisma.ApplicationSelect;
 const detailsSelect = {
   ...summarySelect,
-  inspection: { select: { ...stageSelect, result: true } },
+  inspection: summarySelect.inspection,
   preparation: { select: { ...stageSelect, result: true } },
   events: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -151,8 +157,45 @@ const detailsSelect = {
 type Row = Prisma.ApplicationGetPayload<{ select: typeof summarySelect }>;
 type DetailRow = Prisma.ApplicationGetPayload<{ select: typeof detailsSelect }>;
 const date = (value: Date | null) => value?.toISOString() ?? null;
+const inspectionReviewMessages = {
+  CAPTCHA: 'The employer form requires a CAPTCHA or human verification.',
+  AUTHENTICATION_REQUIRED: 'The employer form requires you to sign in.',
+  INTERACTIVE_DISCOVERY_REQUIRED:
+    'No application fields were detected. Retry inspection to reload the form, or check it on the employer site.',
+  SENSITIVE_QUESTION:
+    'The form contains questions that need explicit candidate answers.',
+  UNEXPECTED_NAVIGATION:
+    'The application destination changed unexpectedly and needs review.',
+  PLATFORM_MISMATCH:
+    'The detected application platform does not match the planned destination.',
+  UNSUPPORTED_INTERACTION:
+    'The form requires an interaction that automatic inspection does not support.',
+} as const;
+function inspectionReviewReasons(row: Row) {
+  if (row.inspection?.state !== 'HUMAN_REQUIRED') return [];
+  const parsed = ApplicationSchemaSchema.safeParse(row.inspection.result);
+  const reasons = parsed.success ? parsed.data.humanReview.reasons : [];
+  return reasons.length
+    ? reasons.map((reason) => inspectionReviewMessages[reason])
+    : [
+        issue(row.inspection.errorCode, row.inspection.state) ??
+          'The inspected form needs your review.',
+      ];
+}
 function issue(code: string | null, state: string) {
   const explanations: Record<string, string> = {
+    CAPTCHA:
+      'The employer requires reCAPTCHA. Complete this application on the employer site.',
+    ASHBY_FORM_CHANGED:
+      'The employer form changed. Reinspect and prepare it before submitting.',
+    ASHBY_REQUEST_REJECTED:
+      'Ashby rejected a request. Check the employer form before continuing.',
+    ASHBY_INVALID_RESPONSE:
+      'The employer response could not be interpreted. Check the submission outcome on the employer site.',
+    ASHBY_UNSUPPORTED_FIELD:
+      'A field requires a browser interaction. Complete this application on the employer site.',
+    ASHBY_SURVEY_REVIEW_REQUIRED:
+      'The employer survey forms require manual completion.',
     UNSAFE_DESTINATION:
       'The destination failed security validation. Review is required.',
     AUTHENTICATION_OR_SECURITY_CHALLENGE:
@@ -167,6 +210,8 @@ function issue(code: string | null, state: string) {
     CONNECTION_FAILURE: 'The application page could not be reached.',
     NAVIGATION_TIMEOUT: 'The application page timed out during inspection.',
     INSPECTION_TIMEOUT: 'The application form could not be inspected in time.',
+    FORM_FIELDS_NOT_FOUND:
+      'No application fields were detected after waiting for the page to render. Retry inspection or check the employer form.',
     UNEXPECTED_NAVIGATION:
       'The application destination changed unexpectedly. Human review is required.',
     MUTATING_REQUEST_BLOCKED:
@@ -234,7 +279,13 @@ function executionSummary(row: Row['executions'][number]) {
       : null,
   };
 }
-function summarize(row: Row) {
+type ExecutionSettings = {
+  allowRealExecution?: boolean;
+  autoSubmit?: boolean;
+  autoSubmitSince?: string;
+  executionFixtureOrigin?: string;
+};
+function summarize(row: Row, settings: ExecutionSettings = {}) {
   const destination =
     ApplicationPlanSchema.innerType().shape.destination.safeParse(
       row.plan?.destination,
@@ -284,9 +335,7 @@ function summarize(row: Row) {
         ...(row.state === 'HUMAN_REQUIRED'
           ? ['The application is waiting for your review.']
           : []),
-        ...(row.inspection?.state === 'HUMAN_REQUIRED'
-          ? ['The inspected form needs your review.']
-          : []),
+        ...inspectionReviewReasons(row),
         ...(row.preparation?.state === 'HUMAN_REQUIRED'
           ? ['Prepared answers or document selections need your review.']
           : []),
@@ -315,9 +364,7 @@ function summarize(row: Row) {
             )
           ? false
           : row.preparation
-            ? ['PENDING', 'RUNNING'].includes(row.preparation.state) ||
-              (row.preparation.state === 'COMPLETED' &&
-                ['RESOLVED', 'READY'].includes(row.state))
+            ? ['PENDING', 'RUNNING'].includes(row.preparation.state)
             : row.inspection
               ? ['PENDING', 'RUNNING'].includes(row.inspection.state)
               : ['DISCOVERED', 'ANALYZING', 'EXECUTING', 'VERIFYING'].includes(
@@ -331,7 +378,73 @@ function summarize(row: Row) {
     row.emailMessage?.updatedAt,
     ...row.executions.flatMap((e) => [e.updatedAt, e.verification?.updatedAt]),
   ].filter((d): d is Date => !!d);
+  const inspectedForExecution = ApplicationSchemaSchema.safeParse(
+    row.inspection?.result,
+  );
+  const code =
+    inspectedForExecution.success && inspectedForExecution.data.ashbySubmission
+      ? ashbySubmissionBlocker(inspectedForExecution.data.ashbySubmission)
+      : null;
+  const reasons: Record<string, string> = {
+    CAPTCHA:
+      'The employer requires reCAPTCHA. Complete this application on the employer site.',
+    ASHBY_SURVEY_REVIEW_REQUIRED:
+      'The employer includes additional survey forms. Complete them on the employer site.',
+    ASHBY_UNSUPPORTED_FIELD:
+      'The employer includes a field that requires a browser interaction. Complete the application on the employer site.',
+  };
+  const flow =
+    inspectedForExecution.success &&
+    !!(
+      inspectedForExecution.data.executionFlow ||
+      inspectedForExecution.data.ashbySubmission
+    );
+  const fixtureReady =
+    settings.executionFixtureOrigin &&
+    inspectedForExecution.success &&
+    new URL(inspectedForExecution.data.finalUrl).origin ===
+      settings.executionFixtureOrigin &&
+    flow;
+  const executionReadiness = {
+    state:
+      execution &&
+      (execution.mode !== 'DRY_RUN' ||
+        ['PENDING', 'PREPARING', 'RUNNING'].includes(execution.state))
+        ? 'STARTED'
+        : reviewReasons.length
+          ? 'REVIEW_REQUIRED'
+          : row.preparation?.state !== 'COMPLETED'
+            ? 'PREPARATION_REQUIRED'
+            : !flow || code
+              ? 'BLOCKED'
+              : !settings.allowRealExecution && !fixtureReady
+                ? 'DISABLED'
+                : 'READY',
+    reason:
+      execution && execution.mode !== 'DRY_RUN'
+        ? null
+        : reviewReasons.length
+          ? 'Resolve the required reviews before submission.'
+          : row.preparation?.state !== 'COMPLETED'
+            ? 'Complete preparation before submission.'
+            : !flow
+              ? 'Submission handling has not been inspected. Retry form inspection.'
+              : code
+                ? reasons[code]
+                : !settings.allowRealExecution && !fixtureReady
+                  ? 'Real application submission is disabled in the server configuration.'
+                  : null,
+    automatic:
+      !!settings.allowRealExecution &&
+      !!settings.autoSubmit &&
+      !fixtureReady &&
+      (!settings.autoSubmitSince ||
+        !row.preparation?.completedAt ||
+        row.preparation.completedAt.getTime() >=
+          Date.parse(settings.autoSubmitSince)),
+  };
   return ApplicationSummarySchema.parse({
+    executionReadiness,
     id: row.id,
     state: row.state,
     createdAt: row.createdAt.toISOString(),
@@ -353,7 +466,15 @@ function summarize(row: Row) {
             : null,
         }
       : null,
-    inspection: row.inspection ? stage(row.inspection) : null,
+    inspection: row.inspection
+      ? {
+          ...stage(row.inspection),
+          issue:
+            row.inspection.state === 'HUMAN_REQUIRED'
+              ? inspectionReviewReasons(row).join(' ')
+              : issue(row.inspection.errorCode, row.inspection.state),
+        }
+      : null,
     preparation: row.preparation ? stage(row.preparation) : null,
     execution: execution ? executionSummary(execution) : null,
     ...(row.googleFormRun
@@ -370,11 +491,17 @@ function summarize(row: Row) {
     reviewReasons,
     active:
       (!!busy ||
+        (executionReadiness.state === 'READY' &&
+          executionReadiness.automatic) ||
         ['QUEUED', 'SENDING'].includes(row.emailMessage?.state ?? '')) &&
       reviewReasons.length === 0,
   });
 }
-function detail(row: DetailRow, fixtureOrigin?: string) {
+function detail(
+  row: DetailRow,
+  fixtureOrigin?: string,
+  settings: ExecutionSettings = {},
+) {
   const timeline = row.events
     .slice(0, 100)
     .reverse()
@@ -437,7 +564,10 @@ function detail(row: DetailRow, fixtureOrigin?: string) {
   const validPrepared =
     prepared.success && prepared.data.applicationId === row.id;
   const inspected = ApplicationSchemaSchema.safeParse(row.inspection?.result);
-  const safeSummary = summarize(row);
+  const safeSummary = summarize(row, {
+    ...settings,
+    ...(fixtureOrigin ? { executionFixtureOrigin: fixtureOrigin } : {}),
+  });
   const needed =
     validPrepared && row.preparation?.state === 'HUMAN_REQUIRED'
       ? prepared.data.humanReviewItems
@@ -474,7 +604,8 @@ function detail(row: DetailRow, fixtureOrigin?: string) {
       fixtureOrigin &&
       inspected.success &&
       new URL(inspected.data.finalUrl).origin === fixtureOrigin &&
-      inspected.data.executionFlow &&
+      (inspected.data.executionFlow || inspected.data.ashbySubmission) &&
+      safeSummary.executionReadiness?.state === 'READY' &&
       row.inspection?.state === 'COMPLETED' &&
       row.preparation?.state === 'COMPLETED' &&
       !safeSummary.humanReviewRequired &&
@@ -483,8 +614,29 @@ function detail(row: DetailRow, fixtureOrigin?: string) {
         ? (['DRY_RUN', 'TEST_FIXTURE'] as const).filter(
             (mode) => !row.executions.some((e) => e.mode === mode),
           )
-        : [],
+        : safeSummary.executionReadiness?.state === 'READY' &&
+            settings.allowRealExecution &&
+            ['RESOLVED', 'READY'].includes(row.state) &&
+            !row.executions.some((e) => e.mode !== 'DRY_RUN') &&
+            inspected.success &&
+            ['GREENHOUSE', 'LEVER', 'ASHBY'].includes(
+              inspected.data.platform,
+            ) &&
+            (!fixtureOrigin ||
+              new URL(inspected.data.finalUrl).origin !== fixtureOrigin)
+          ? ['REAL_EXECUTION']
+          : [],
     reviewReasons: [...safeSummary.reviewReasons, ...new Set(needed)],
+    inspectionRetryAllowed:
+      !!row.inspection &&
+      ['RESOLVED', 'READY'].includes(row.state) &&
+      row.executions.length === 0 &&
+      ((!row.preparation &&
+        (row.inspection.state === 'FAILED' ||
+          canRetryEmptyInspection(row.inspection))) ||
+        (!['PENDING', 'RUNNING'].includes(row.preparation?.state ?? '') &&
+          (canRepairChoiceInspection(row.inspection) ||
+            canRepairSubmissionInspection(row.inspection)))),
     preparationAllowed:
       !!row.inspection &&
       inspected.success &&
@@ -556,6 +708,9 @@ export function registerApplicationRoutes(
     db?: PrismaClient;
     authSecret?: string;
     executionFixtureOrigin?: string;
+    allowRealExecution?: boolean;
+    autoSubmit?: boolean;
+    autoSubmitSince?: string;
   },
 ) {
   for (const kind of ['list', 'detail'] as const) {
@@ -583,7 +738,11 @@ export function registerApplicationRoutes(
             if (!row)
               return reply.code(404).send({ error: 'APPLICATION_NOT_FOUND' });
             return {
-              application: detail(row, dependencies.executionFixtureOrigin),
+              application: detail(
+                row,
+                dependencies.executionFixtureOrigin,
+                dependencies,
+              ),
             };
           }
           const parsed = querySchema.safeParse(request.query);
@@ -636,7 +795,7 @@ export function registerApplicationRoutes(
             { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
           );
           return {
-            applications: rows.map(summarize),
+            applications: rows.map((row) => summarize(row, dependencies)),
             pagination: {
               page: q.page,
               limit: q.limit,

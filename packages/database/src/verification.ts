@@ -148,12 +148,18 @@ export async function ensureSubmissionVerification(
           application.inspection.applicationPlanId !==
             execution.applicationPlanId ||
           application.preparation.inspectionId !== execution.inspectionId ||
-          !schema.executionFlow?.pages.some(
-            (p) =>
-              p.action === 'SUBMIT' &&
-              `${new URL(p.control.actionUrl).origin}${new URL(p.control.actionUrl).pathname}` ===
-                mutation.destination,
-          )
+          (!(
+            schema.ashbySubmission &&
+            schema.platform === 'ASHBY' &&
+            mutation.destination ===
+              `${new URL(schema.finalUrl).origin}/api/non-user-graphql`
+          ) &&
+            !schema.executionFlow?.pages.some(
+              (p) =>
+                p.action === 'SUBMIT' &&
+                `${new URL(p.control.actionUrl).origin}${new URL(p.control.actionUrl).pathname}` ===
+                  mutation.destination,
+            ))
         )
           throw new Error('SUBMISSION_ARTIFACT_IDENTITY_MISMATCH');
         context = VerificationContextSchema.parse({
@@ -180,6 +186,11 @@ export async function ensureSubmissionVerification(
             : {}),
           ...(mutation.responseFingerprint
             ? { responseFingerprint: mutation.responseFingerprint }
+            : {}),
+          ...(schema.platform === 'ASHBY' &&
+          schema.ashbySubmission &&
+          mutation.providerOutcome
+            ? { providerOutcome: mutation.providerOutcome }
             : {}),
         });
       } catch {
@@ -277,6 +288,7 @@ export async function assertVerificationContextCurrent(
     mutation.responseReceivedAt !== context.responseReceivedAt ||
     mutation.responseStatus !== context.responseStatus ||
     mutation.responseFingerprint !== context.responseFingerprint ||
+    mutation.providerOutcome !== context.providerOutcome ||
     mutation.requestDigest !== context.requestFingerprint ||
     mutation.destination !== context.destination ||
     mutation.startedAt !== context.submissionStartedAt ||

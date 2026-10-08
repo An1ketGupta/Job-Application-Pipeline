@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { request } from '@/lib/api';
 import type { ApplicationDetail } from '@/lib/types';
 import { Feedback, button, panel, message } from './CandidateUI';
+import { SubmissionPreview } from './SubmissionPreview';
 
 export function ApplicationExecutionActions({
   application: app,
@@ -28,18 +29,31 @@ export function ApplicationExecutionActions({
     );
   const canDecide = verification?.state === 'HUMAN_REQUIRED';
   async function act(
-    operation: 'DRY_RUN' | 'TEST_FIXTURE' | 'check' | 'confirm' | 'reject',
+    operation:
+      | 'DRY_RUN'
+      | 'TEST_FIXTURE'
+      | 'REAL_EXECUTION'
+      | 'check'
+      | 'confirm'
+      | 'reject',
   ) {
     if (
       busy ||
-      (['TEST_FIXTURE', 'confirm', 'reject'].includes(operation) && !confirmed)
+      (['REAL_EXECUTION', 'TEST_FIXTURE', 'confirm', 'reject'].includes(
+        operation,
+      ) &&
+        !confirmed)
     )
       return;
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
-      if (operation === 'DRY_RUN' || operation === 'TEST_FIXTURE') {
+      if (
+        operation === 'DRY_RUN' ||
+        operation === 'TEST_FIXTURE' ||
+        operation === 'REAL_EXECUTION'
+      ) {
         await request(
           `/api/v1/applications/${encodeURIComponent(app.id)}/execute`,
           {
@@ -87,23 +101,34 @@ export function ApplicationExecutionActions({
   }
   if (app.googleForm || app.plan?.platform === 'GOOGLE_FORM') return null;
   if (!modes.length && !canCheck && !canDecide && !success && !error)
-    return null;
+    return app.preparation?.state === 'COMPLETED' &&
+      app.plan?.applicationType !== 'EMAIL' ? (
+      <SubmissionPreview applicationId={app.id} token={token} />
+    ) : null;
   return (
     <section className={panel} aria-label="Execution and verification controls">
       <h2 className="font-bold">
         {modes.length
-          ? 'Controlled local execution'
+          ? modes.includes('REAL_EXECUTION')
+            ? 'Submit application'
+            : 'Controlled local execution'
           : 'Resolve submission outcome'}
       </h2>
       <Feedback busy={busy} error={error} success={success} />
+      {app.preparation?.state === 'COMPLETED' && (
+        <div className="mt-4">
+          <SubmissionPreview applicationId={app.id} token={token} />
+        </div>
+      )}
       {!!modes.length && (
         <>
           <p className="mt-3 text-sm text-slate-600">
-            These controls use the configured local test system. DRY_RUN submits
-            nothing. TEST_FIXTURE can submit once after the existing safety
-            checks pass.
+            {modes.includes('REAL_EXECUTION')
+              ? `The worker will send your prepared answers and selected documents to ${app.job.company}. Check them before submitting. Each application is submitted once.`
+              : 'These controls use the configured local test system. DRY_RUN submits nothing. TEST_FIXTURE can submit once after the existing safety checks pass.'}
           </p>
-          {modes.includes('TEST_FIXTURE') && (
+          {(modes.includes('TEST_FIXTURE') ||
+            modes.includes('REAL_EXECUTION')) && (
             <label className="mt-4 flex items-start gap-2 text-sm">
               <input
                 type="checkbox"
@@ -111,10 +136,23 @@ export function ApplicationExecutionActions({
                 disabled={busy}
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
-              <span>I authorize one controlled TEST_FIXTURE submission.</span>
+              <span>
+                {modes.includes('REAL_EXECUTION')
+                  ? 'I authorize submission of this application to the employer.'
+                  : 'I authorize one controlled TEST_FIXTURE submission.'}
+              </span>
             </label>
           )}
           <div className="mt-4 flex flex-wrap gap-3">
+            {modes.includes('REAL_EXECUTION') && (
+              <button
+                className={button}
+                disabled={busy || !confirmed}
+                onClick={() => void act('REAL_EXECUTION')}
+              >
+                Submit application
+              </button>
+            )}
             {modes.includes('DRY_RUN') && (
               <button
                 className={button}

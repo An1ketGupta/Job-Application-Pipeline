@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { UrlSyntaxSchema } from './destination.js';
 import { ApplicationTypeSchema } from './schemas.js';
 import { ExecutionFlowSchema } from './execution-flow.js';
+import { AshbySubmissionSchema } from './ashby-submission.js';
 
 export const InspectionStateSchema = z.enum([
   'PENDING',
@@ -84,6 +85,13 @@ export const ApplicationFieldSchema = z
     domId: ShortText.optional(),
     name: ShortText.optional(),
     label: ShortText,
+    questionLabel: ShortText.optional(),
+    questionRequired: z.boolean().optional(),
+    description: ShortText.optional(),
+    choiceGroup: z
+      .object({ id: ShortText, label: ShortText, required: z.boolean() })
+      .strict()
+      .optional(),
     type: FieldTypeSchema,
     required: z.boolean(),
     visible: z.boolean(),
@@ -179,6 +187,7 @@ export const ApplicationSchemaSchema = z
     documents: z.array(DocumentRequirementSchema).max(100),
     forms: z.array(InspectedFormSchema).max(100),
     executionFlow: ExecutionFlowSchema.optional(),
+    ashbySubmission: AshbySubmissionSchema.optional(),
     authentication: z.object({ required: z.boolean() }).strict(),
     humanReview: z
       .object({ required: z.boolean(), reasons: z.array(ReviewReasonSchema) })
@@ -190,6 +199,7 @@ export const ApplicationSchemaSchema = z
         durationMs: z.number().nonnegative(),
         visibleTextExcerpt: z.string().max(4000),
         fieldCount: z.number().int().nonnegative(),
+        formParserVersion: z.number().int().positive().optional(),
       })
       .strict(),
   })
@@ -198,16 +208,172 @@ export type ApplicationSchema = z.infer<typeof ApplicationSchemaSchema>;
 export type InspectionState = z.infer<typeof InspectionStateSchema>;
 export type ApplicationField = z.infer<typeof ApplicationFieldSchema>;
 
+// Keep physical controls intact for DOM identity checks. Preparation and review
+// consume one logical field per question, with the group's allowed labels.
+export function applicationAnswerFields(
+  fields: ApplicationField[],
+): ApplicationField[] {
+  const seen = new Set<string>();
+  return fields.flatMap((field) => {
+    if (!field.choiceGroup)
+      return [
+        {
+          ...field,
+          label: field.questionLabel ?? field.label,
+          required: field.questionRequired ?? field.required,
+        },
+      ];
+    const key = `${field.formId ?? ''}:${field.type}:${field.choiceGroup.id}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const members = fields.filter(
+      (f) =>
+        f.type === field.type &&
+        f.formId === field.formId &&
+        f.choiceGroup?.id === field.choiceGroup!.id,
+    );
+    return [
+      {
+        ...field,
+        label: field.choiceGroup.label,
+        required: field.choiceGroup.required,
+        options: members
+          .filter((f) => !f.disabled && !f.readonly)
+          .map((f) => f.label),
+      },
+    ];
+  });
+}
+
+export function selectedChoiceLabels(value: string): string[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) &&
+      parsed.every((v) => typeof v === 'string') &&
+      new Set(parsed).size === parsed.length
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function expandApplicationAnswerValues(
+  fields: ApplicationField[],
+  values: Map<string, string | null>,
+) {
+  const expanded = new Map(values);
+  for (const field of applicationAnswerFields(fields).filter(
+    (f) => f.choiceGroup,
+  )) {
+    const value = values.get(field.id);
+    const selected =
+      value == null
+        ? []
+        : field.type === 'CHECKBOX'
+          ? (selectedChoiceLabels(value) ?? [])
+          : [value];
+    for (const member of fields.filter(
+      (f) =>
+        f.type === field.type &&
+        f.formId === field.formId &&
+        f.choiceGroup?.id === field.choiceGroup!.id,
+    )) {
+      expanded.set(
+        member.id,
+        field.type === 'CHECKBOX'
+          ? selected.includes(member.label)
+            ? 'true'
+            : 'false'
+          : selected.includes(member.label)
+            ? (member.optionValue ?? member.label)
+            : null,
+      );
+    }
+  }
+  return expanded;
+}
+
+// Only an empty discovery result can be retried. A fresh inspection must still
+// pass every security check; this never clears a security or answer review.
+export function canRetryEmptyInspection(inspection: {
+  id: string;
+  applicationPlanId: string;
+  state: string;
+  errorCode: string | null;
+  result: unknown;
+}): boolean {
+  const parsed = ApplicationSchemaSchema.safeParse(inspection.result);
+  return (
+    inspection.state === 'HUMAN_REQUIRED' &&
+    (!inspection.errorCode ||
+      inspection.errorCode === 'FORM_FIELDS_NOT_FOUND') &&
+    parsed.success &&
+    parsed.data.inspectionId === inspection.id &&
+    parsed.data.applicationPlanId === inspection.applicationPlanId &&
+    parsed.data.fields.length === 0 &&
+    parsed.data.humanReview.required &&
+    parsed.data.humanReview.reasons.length === 1 &&
+    parsed.data.humanReview.reasons[0] === 'INTERACTIVE_DISCOVERY_REQUIRED'
+  );
+}
+
+export function canRepairChoiceInspection(inspection: {
+  id: string;
+  applicationPlanId: string;
+  state: string;
+  errorCode: string | null;
+  result: unknown;
+}): boolean {
+  const parsed = ApplicationSchemaSchema.safeParse(inspection.result);
+  return (
+    parsed.success &&
+    inspection.state === 'COMPLETED' &&
+    !inspection.errorCode &&
+    parsed.data.inspectionId === inspection.id &&
+    parsed.data.applicationPlanId === inspection.applicationPlanId &&
+    !parsed.data.humanReview.required &&
+    !parsed.data.authentication.required &&
+    (parsed.data.inspectionMetadata.formParserVersion ?? 1) < 2 &&
+    parsed.data.fields.some((f) => ['RADIO', 'CHECKBOX'].includes(f.type)) &&
+    !parsed.data.fields.some((f) => f.choiceGroup)
+  );
+}
+
+export function canRepairSubmissionInspection(inspection: {
+  id: string;
+  applicationPlanId: string;
+  state: string;
+  errorCode: string | null;
+  result: unknown;
+}): boolean {
+  const parsed = ApplicationSchemaSchema.safeParse(inspection.result);
+  return (
+    parsed.success &&
+    inspection.state === 'COMPLETED' &&
+    !inspection.errorCode &&
+    parsed.data.inspectionId === inspection.id &&
+    parsed.data.applicationPlanId === inspection.applicationPlanId &&
+    parsed.data.platform === 'ASHBY' &&
+    !parsed.data.ashbySubmission &&
+    !parsed.data.executionFlow &&
+    !parsed.data.authentication.required &&
+    !parsed.data.humanReview.required
+  );
+}
+
 export const inspectionTransitions: Record<
   InspectionState,
   readonly InspectionState[]
 > = {
   PENDING: ['RUNNING', 'FAILED'],
   RUNNING: ['COMPLETED', 'HUMAN_REQUIRED', 'FAILED'],
-  COMPLETED: [],
+  // Reinspection is guarded by canRepairChoiceInspection and lifecycle checks.
+  COMPLETED: ['PENDING'],
   // Only a guarded worker may clear a sensitive-question-only review after
   // preparation validates explicit candidate answers. Security gates stay closed.
-  HUMAN_REQUIRED: ['COMPLETED'],
+  // PENDING is restricted by canRetryEmptyInspection and API ownership/lifecycle guards.
+  HUMAN_REQUIRED: ['COMPLETED', 'PENDING'],
   FAILED: ['PENDING'],
 };
 

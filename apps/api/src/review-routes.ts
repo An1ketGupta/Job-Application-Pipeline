@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Prisma, saveReviewedAnswer } from '@careerlift/database';
 import {
+  applicationAnswerFields,
   ApplicationSchemaSchema,
   PreparedApplicationSchema,
   ReviewDecisionSchema,
@@ -80,7 +81,7 @@ function reviewProjection(row: Row, aiConfigured = false) {
           const question = inspection.data.questions.find(
             (q) => q.id === item.requirementId,
           );
-          const field = inspection.data.fields.find(
+          const field = applicationAnswerFields(inspection.data.fields).find(
             (f) => f.id === (question?.fieldId ?? item.requirementId),
           );
           const document = inspection.data.documents.find(
@@ -152,6 +153,9 @@ function reviewProjection(row: Row, aiConfigured = false) {
             maxLength: field?.maxLength ?? 10000,
             minLength: field?.minLength ?? 1,
             fieldType: field?.type ?? 'TEXT',
+            required: field?.required ?? true,
+            description: field?.description ?? null,
+            multiple: field?.type === 'CHECKBOX' && Boolean(field.choiceGroup),
             documentType: document?.type ?? null,
             acceptedFileTypes: document?.acceptedFileTypes ?? [],
             status: latest?.action === 'REJECT' ? 'REJECTED' : 'PENDING',
@@ -527,7 +531,7 @@ export function registerReviewRoutes(
                 const question = inspection.questions.find(
                   (q) => q.id === body.requirementId,
                 );
-                const field = inspection.fields.find(
+                const field = applicationAnswerFields(inspection.fields).find(
                   (f) => f.id === (question?.fieldId ?? body.requirementId),
                 );
                 const requirement = inspection.documents.find(

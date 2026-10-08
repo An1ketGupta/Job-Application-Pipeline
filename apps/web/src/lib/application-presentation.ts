@@ -94,7 +94,17 @@ export function applicationHeadline(app: ApplicationSummary) {
     ['PENDING', 'RUNNING', 'FAILED'].includes(app.inspection.state)
   )
     return `Inspection: ${stateLabel(app.inspection.state)}`;
-  if (app.preparation?.state === 'COMPLETED') return 'Ready for execution';
+  if (app.preparation?.state === 'COMPLETED') {
+    if (app.executionReadiness?.state === 'BLOCKED')
+      return 'Submission needs attention';
+    if (app.executionReadiness?.state === 'DISABLED')
+      return 'Submission disabled';
+    if (app.executionReadiness?.state === 'READY')
+      return app.executionReadiness.automatic
+        ? 'Ready for automatic submission'
+        : 'Ready to submit';
+    return 'Preparation complete';
+  }
   if (app.inspection?.state === 'COMPLETED') return 'Preparation required';
   if (app.plan && ['RESOLVED', 'READY'].includes(app.state))
     return 'Inspection required';

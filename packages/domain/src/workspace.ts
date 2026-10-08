@@ -86,6 +86,21 @@ export const ApplicationSummarySchema = z
     humanReviewRequired: z.boolean(),
     reviewReasons: z.array(z.string()),
     active: z.boolean(),
+    executionReadiness: z
+      .object({
+        state: z.enum([
+          'READY',
+          'BLOCKED',
+          'DISABLED',
+          'PREPARATION_REQUIRED',
+          'REVIEW_REQUIRED',
+          'STARTED',
+        ]),
+        reason: z.string().nullable(),
+        automatic: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export const WorkspaceTimelineEntrySchema = z
@@ -96,11 +111,9 @@ export const WorkspaceTimelineEntrySchema = z
   })
   .strict();
 export const ApplicationDetailsSchema = ApplicationSummarySchema.extend({
-  executionModes: z
-    .array(z.enum(['DRY_RUN', 'TEST_FIXTURE']))
-    .max(2)
-    .optional(),
+  executionModes: z.array(ExecutionModeSchema).max(3).optional(),
   preparationAllowed: z.boolean().optional(),
+  inspectionRetryAllowed: z.boolean().optional(),
   executions: z.array(WorkspaceExecutionSchema).max(3),
   timeline: z.array(WorkspaceTimelineEntrySchema).max(250),
   timelineTruncated: z.boolean(),

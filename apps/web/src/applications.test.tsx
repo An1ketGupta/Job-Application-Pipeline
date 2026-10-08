@@ -15,6 +15,7 @@ import { fetchApplication, fetchApplications } from './lib/api';
 import type { ApplicationDetail } from './lib/types';
 import { ApplicationSummarySchema } from '@careerlift/domain';
 import { GoogleFormSubmissionFlag } from './components/applications/GoogleFormSubmissionFlag';
+import { ApplicationPreparationActions } from './components/candidate/ApplicationPreparationActions';
 const at = '2026-10-07T10:00:00.000Z';
 describe('Google Forms submission flags', () => {
   it.each([
@@ -97,6 +98,52 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('Application workspace presentation', () => {
+  it('shows inspection recovery without claiming execution failed or asking for candidate answers', () => {
+    const app: ApplicationDetail = {
+      ...base,
+      plan: {
+        applicationType: 'EXTERNAL_ATS',
+        provider: 'ASHBY',
+        platform: 'ASHBY',
+        requiresHumanReview: false,
+        createdAt: at,
+      },
+      inspection: {
+        state: 'HUMAN_REQUIRED',
+        startedAt: at,
+        completedAt: at,
+        updatedAt: at,
+        issue: 'No application fields were detected.',
+      },
+      humanReviewRequired: true,
+      reviewReasons: ['No application fields were detected.'],
+      inspectionRetryAllowed: true,
+    };
+    const html = renderToString(<ApplicationDetailsView application={app} />);
+    expect(html).toContain(
+      'Form inspection stopped before answer preparation or submission.',
+    );
+    expect(html).toContain('No application fields were detected.');
+    expect(html).not.toContain('An execution failure');
+    expect(html).not.toContain('Review required information');
+    const actions = renderToString(
+      <ApplicationPreparationActions
+        application={app}
+        token="test-token"
+        refresh={() => {}}
+      />,
+    );
+    expect(actions).toContain('Retry form inspection');
+    expect(
+      renderToString(
+        <ApplicationPreparationActions
+          application={{ ...app, inspectionRetryAllowed: false }}
+          token="test-token"
+          refresh={() => {}}
+        />,
+      ),
+    ).toBe('');
+  });
   it('renders cards, metadata, job navigation, stages and the safe timeline', () => {
     const card = renderToString(<ApplicationCard application={base} />);
     expect(card).toContain('Engineer &lt;script&gt;');

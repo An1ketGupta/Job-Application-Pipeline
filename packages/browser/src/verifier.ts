@@ -53,6 +53,46 @@ export class GenericSubmissionVerifier implements SubmissionVerifier {
   }
 }
 
+// Ashby's typed GraphQL outcome comes from the original pinned POST response,
+// bound to the persisted final mutation. A generic HTTP 200 is still weak.
+export class AshbySubmissionVerifier implements SubmissionVerifier {
+  supports(context: VerificationContext) {
+    return context.platform === 'ASHBY' && !!context.providerOutcome;
+  }
+  async verify(
+    context: VerificationContext,
+    signal: AbortSignal,
+  ): Promise<VerificationResult> {
+    signal.throwIfAborted();
+    if (
+      !this.supports(context) ||
+      context.mutationOutcome !== 'FORWARDED' ||
+      context.responseStatus !== 200 ||
+      !context.responseFingerprint ||
+      !context.responseReceivedAt
+    )
+      return {
+        evidence: ledgerEvidence(context),
+        reason: 'NO_BOUND_ASHBY_RESPONSE',
+      };
+    return {
+      evidence: [
+        {
+          ...evidenceIdentity(context),
+          type: 'HTTP_RESPONSE',
+          source: 'PROVIDER_RESPONSE',
+          strength: 'STRONG',
+          capturedAt: context.responseReceivedAt,
+          httpStatus: 200,
+          responseFingerprint: context.responseFingerprint,
+          outcome: context.providerOutcome!,
+        },
+      ],
+      reason: 'ASHBY_TYPED_SUBMISSION_RESPONSE',
+    };
+  }
+}
+
 // Only a trusted, explicitly configured local HTTPS fixture gets this adapter.
 // No production ATS is claimed to support this private fixture receipt protocol.
 class VerificationReadPolicy implements BrowserNetworkPolicy {

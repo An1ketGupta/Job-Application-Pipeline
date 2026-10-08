@@ -3,6 +3,9 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "scripts": {
+    "test:ashby": "vitest run packages/browser/src/ashby-execution.test.ts apps/api/src/ashby-execution.test.ts apps/worker/src/automatic-execution.test.ts",
+    "test:ashby:e2e": "vitest run --config vitest.integration.config.ts apps/api/src/ashby-pipeline.integration.test.ts",
+    "typecheck:ashby": "tsc --noEmit -p tsconfig.ashby-tests.json",
     "test:google-forms": "node scripts/google-forms-acceptance.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck && pnpm typecheck:execution-tests",

@@ -24,6 +24,12 @@ export interface BrowserSession {
     pending: number;
   };
 }
+export type ReadOnlyRequestGuard = (
+  url: string,
+  method: string,
+  body: Buffer,
+  contentType: string,
+) => boolean | 'BLOCK_OPTIONAL';
 export class BrowserSessionManager {
   private blockedNavigation: InspectionError | undefined;
   constructor(
@@ -41,6 +47,7 @@ export class BrowserSessionManager {
   }
   async create(
     navigationGuard?: (url: string) => void,
+    readOnlyRequestGuard?: ReadOnlyRequestGuard,
   ): Promise<BrowserSession> {
     let browser: Browser;
     try {
@@ -64,7 +71,33 @@ export class BrowserSessionManager {
       const handleRoute = async (route: Route) => {
         const request = route.request();
         try {
-          this.policy.validateRequest(request.url(), request.method());
+          try {
+            this.policy.validateRequest(request.url(), request.method());
+          } catch (error) {
+            if (
+              !(error instanceof InspectionError) ||
+              error.code !== 'MUTATING_REQUEST_BLOCKED' ||
+              this.policy.forwardMutationsWithoutRetries
+            )
+              throw error;
+            const decision = readOnlyRequestGuard?.(
+              request.url(),
+              request.method(),
+              request.postDataBuffer() ?? Buffer.alloc(0),
+              request.headers()['content-type'] ?? '',
+            );
+            if (
+              decision === 'BLOCK_OPTIONAL' &&
+              !request.isNavigationRequest()
+            ) {
+              await route.abort('blockedbyclient');
+              return;
+            }
+            if (decision !== true) throw error;
+            // Apply the same URL restrictions as ordinary reads after the
+            // inspection-only guard has validated the complete POST payload.
+            this.policy.validateRequest(request.url(), 'GET');
+          }
           if (request.isNavigationRequest()) {
             this.policy.validateNavigation(request.url());
             navigationGuard?.(request.url());
