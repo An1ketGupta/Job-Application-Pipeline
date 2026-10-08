@@ -140,6 +140,10 @@ export async function request<T>(
         'Retry form inspection to identify the submission flow.',
       CAPTCHA:
         'The employer requires reCAPTCHA. Complete this application on the employer site.',
+      ASHBY_BROWSER_VERIFICATION_REQUIRED:
+        'Complete verification in the open employer browser, then continue here.',
+      ASHBY_SESSION_LOST:
+        'The browser session ended. Continue to reopen it and restore prepared answers.',
       ASHBY_SURVEY_REVIEW_REQUIRED:
         'Complete the employer survey forms on the employer site.',
       ASHBY_UNSUPPORTED_FIELD:

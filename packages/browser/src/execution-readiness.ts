@@ -11,7 +11,11 @@ import { ExecutionNetworkPolicy } from './execution-policy.js';
 
 export async function validateExecutionTarget(
   input: ExecutionInput,
-  options: { fixtureOrigin?: string; policy?: BrowserNetworkPolicy },
+  options: {
+    fixtureOrigin?: string;
+    policy?: BrowserNetworkPolicy;
+    ashbyBrowserAssisted?: boolean;
+  },
 ) {
   if (input.inspection.ashbySubmission && !input.inspection.executionFlow) {
     if (
@@ -22,7 +26,10 @@ export async function validateExecutionTarget(
         'UNSUPPORTED_APPLICATION_PLATFORM',
         'The submission adapter does not match this application',
       );
-    const blocker = ashbySubmissionBlocker(input.inspection.ashbySubmission);
+    const blocker = ashbySubmissionBlocker(
+      input.inspection.ashbySubmission,
+      options.ashbyBrowserAssisted && input.mode !== 'DRY_RUN',
+    );
     if (blocker)
       throw new InspectionError(blocker, 'The employer requires manual action');
     const base =

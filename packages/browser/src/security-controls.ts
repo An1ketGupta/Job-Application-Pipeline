@@ -33,6 +33,7 @@ export type SecuritySnapshot = {
 export async function inspectSecurityControls(
   page: Page,
   trustedSession?: CDPSession,
+  options?: { allowRecaptchaFrames?: boolean },
 ): Promise<SecuritySnapshot> {
   let complete = true,
     captcha = false,
@@ -78,6 +79,27 @@ export async function inspectSecurityControls(
         const attrs = new Map<string, string>();
         for (let i = 0; i < (node.attributes?.length ?? 0); i += 2)
           attrs.set(node.attributes![i]!, node.attributes![i + 1]!);
+        // In the assisted flow Google owns the challenge frame. Never automate
+        // its contents; inspect all employer controls around it as usual.
+        if (options?.allowRecaptchaFrames && node.nodeName === 'IFRAME') {
+          try {
+            const src = new URL(attrs.get('src') ?? '');
+            if (
+              src.protocol === 'https:' &&
+              !src.username &&
+              !src.password &&
+              ['https://www.google.com', 'https://www.recaptcha.net'].includes(
+                src.origin,
+              ) &&
+              /^\/recaptcha\/(api2|enterprise)\//.test(src.pathname)
+            ) {
+              captcha = true;
+              continue;
+            }
+          } catch {
+            /* An unknown frame still fails the ordinary checks. */
+          }
+        }
         const stable = [
           'id',
           'name',

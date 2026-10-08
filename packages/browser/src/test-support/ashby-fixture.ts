@@ -9,6 +9,7 @@ import {
 } from '@careerlift/domain';
 import { testKey, testCert } from './ashby-test-tls.js';
 import { digest } from '../mutation-contract.js';
+import { ASHBY_QUERIES } from '../ashby-form.js';
 
 export function ashbyPosting(captcha = false) {
   return {
@@ -225,7 +226,10 @@ export function ashbyInput(origin: string): ExecutionInput {
   });
 }
 
-export async function ashbyFixture() {
+export async function ashbyFixture(options?: {
+  native?: boolean;
+  prefilled?: boolean;
+}) {
   const calls: {
     operation: string;
     body: Buffer;
@@ -244,10 +248,45 @@ export async function ashbyFixture() {
       if (req.method === 'GET') {
         res.setHeader('content-type', 'text/html');
         res.end(`<!doctype html><title>Fixture</title>
-        <label for="name">Name</label><input id="name" required>
-        <label for="email">Email</label><input id="email" type="email" required>
+        <label for="name">Name</label><input id="name" required ${options?.prefilled ? 'value="Ada"' : ''}>
+        <label for="email">Email</label><input id="email" type="email" required ${options?.prefilled ? 'value="ada@example.com"' : ''}>
         <label for="resume">Resume</label><input id="resume" type="file" accept="application/pdf" required>
         <button type="submit">Submit Application</button>
+        ${
+          options?.native
+            ? `<button id="fixture-human-step">Complete fixture verification</button>
+        <script>
+        const queries = ${JSON.stringify(ASHBY_QUERIES)};
+        const nativeSubmitQuery = queries.submit.replace('$recaptchaToken:String!)', '$recaptchaToken:String!,$sourceAttributionCode:String,$viewedAutomatedProcessingLegalNoticeRuleId:String,$deviceFingerprint:String,$applicationRequestId:String)').replace('recaptchaToken:$recaptchaToken)', 'recaptchaToken:$recaptchaToken,sourceAttributionCode:$sourceAttributionCode,viewedAutomatedProcessingLegalNoticeRuleId:$viewedAutomatedProcessingLegalNoticeRuleId,deviceFingerprint:$deviceFingerprint,applicationRequestId:$applicationRequestId)');
+        const base = {organizationHostedJobsPageName:'fixture',formRenderIdentifier:'render',formDefinitionIdentifier:'definition'};
+        let fixtureToken = '';
+        const previousValues = Object.fromEntries(['name','email'].map(path => [path,document.getElementById(path).value]));
+        async function graphql(op, query, variables) {
+          return (await fetch('/api/non-user-graphql?op='+op,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:op,query,variables})})).json();
+        }
+        for (const path of ['name','email']) document.getElementById(path).addEventListener('blur', async event => {
+          if (previousValues[path] === event.target.value) return;
+          previousValues[path] = event.target.value;
+          await graphql('ApiSetFormValue', queries.setValue, {...base,path,value:event.target.value});
+        });
+        document.getElementById('resume').addEventListener('change', async event => {
+          const file = event.target.files[0];
+          const data = await graphql('ApiCreateFileUploadHandle', queries.uploadHandle, {organizationHostedJobsPageName:'fixture',fileUploadContext:'NonUserFormEngine',filename:file.name,contentType:file.type,contentLength:file.size});
+          const handle = data.data.fileUploadHandle;
+          const form = new FormData(); form.append('Content-Type',file.type);
+          for (const [key,value] of Object.entries(handle.fields)) form.append(key,value);
+          form.append('file',file,file.name);
+          await fetch(handle.url,{method:'POST',body:form});
+          await graphql('ApiSetFormValueToFile',queries.setFile,{...base,path:'resume',fileHandle:handle.handle});
+        });
+        document.getElementById('fixture-human-step').onclick = () => { fixtureToken = 'fixture-human-token'; };
+        document.querySelector('button[type=submit]').onclick = async () => {
+          const data = await graphql('ApiSubmitSingleApplicationFormAction',nativeSubmitQuery,{...base,jobPostingId:'posting',actionIdentifier:'submit-action',recaptchaToken:fixtureToken,viewedAutomatedProcessingLegalNoticeRuleId:null,deviceFingerprint:'fixture-browser-context',applicationRequestId:null});
+          const status = document.createElement('p'); status.id='native-submit-result'; status.textContent = data.errors?.[0]?.message || (data.data?.submitApplicationFormAction?.applicationFormResult?.__typename==='FormSubmitSuccess' ? 'Submitted' : 'Return to CareerLift to continue'); document.body.append(status);
+        };
+        </script>`
+            : ''
+        }
         <script>fetch('/api/non-user-graphql?op=ApiJobPosting',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:'ApiJobPosting',query:'query ApiJobPosting($organizationHostedJobsPageName:String!,$jobPostingId:String!){jobPosting(organizationHostedJobsPageName:$organizationHostedJobsPageName,jobPostingId:$jobPostingId){id}}',variables:{organizationHostedJobsPageName:'fixture',jobPostingId:'posting'}})});</script>`);
         return;
       }

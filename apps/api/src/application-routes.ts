@@ -184,6 +184,16 @@ function inspectionReviewReasons(row: Row) {
 }
 function issue(code: string | null, state: string) {
   const explanations: Record<string, string> = {
+    ASHBY_BROWSER_VERIFICATION_REQUIRED:
+      'In the open Ashby browser, click the employer Submit button and complete any verification. Then return here and continue the application.',
+    ASHBY_SESSION_REOPENED:
+      'The previous browser session ended. Your prepared application was restored in a new browser. Complete verification there, then continue here.',
+    ASHBY_SESSION_LOST:
+      'The assisted browser was closed. Continue to reopen it and restore your prepared application.',
+    ASHBY_BROWSER_FILL_FAILED:
+      'Ashby did not confirm a filled field. Inspect the employer form and retry form inspection.',
+    ASHBY_UNAPPROVED_VALUE:
+      'The employer form attempted to send a value that differs from your prepared application. Update your answers in CareerLift before starting again.',
     CAPTCHA:
       'The employer requires reCAPTCHA. Complete this application on the employer site.',
     ASHBY_FORM_CHANGED:
@@ -281,6 +291,7 @@ function executionSummary(row: Row['executions'][number]) {
 }
 type ExecutionSettings = {
   allowRealExecution?: boolean;
+  ashbyBrowserAssisted?: boolean;
   autoSubmit?: boolean;
   autoSubmitSince?: string;
   executionFixtureOrigin?: string;
@@ -381,9 +392,17 @@ function summarize(row: Row, settings: ExecutionSettings = {}) {
   const inspectedForExecution = ApplicationSchemaSchema.safeParse(
     row.inspection?.result,
   );
+  const browserAssisted =
+    !!settings.ashbyBrowserAssisted &&
+    inspectedForExecution.success &&
+    !!inspectedForExecution.data.ashbySubmission?.requiresCaptcha &&
+    !inspectedForExecution.data.executionFlow;
   const code =
     inspectedForExecution.success && inspectedForExecution.data.ashbySubmission
-      ? ashbySubmissionBlocker(inspectedForExecution.data.ashbySubmission)
+      ? ashbySubmissionBlocker(
+          inspectedForExecution.data.ashbySubmission,
+          browserAssisted,
+        )
       : null;
   const reasons: Record<string, string> = {
     CAPTCHA:
@@ -406,6 +425,7 @@ function summarize(row: Row, settings: ExecutionSettings = {}) {
       settings.executionFixtureOrigin &&
     flow;
   const executionReadiness = {
+    browserAssisted,
     state:
       execution &&
       (execution.mode !== 'DRY_RUN' ||
@@ -433,8 +453,11 @@ function summarize(row: Row, settings: ExecutionSettings = {}) {
                 ? reasons[code]
                 : !settings.allowRealExecution && !fixtureReady
                   ? 'Real application submission is disabled in the server configuration.'
-                  : null,
+                  : browserAssisted
+                    ? 'Open the assisted browser to fill your application, complete verification yourself, then continue here.'
+                    : null,
     automatic:
+      !browserAssisted &&
       !!settings.allowRealExecution &&
       !!settings.autoSubmit &&
       !fixtureReady &&
@@ -612,7 +635,11 @@ function detail(
       ['RESOLVED', 'READY'].includes(row.state) &&
       !row.executions.some((e) => e.mode !== 'DRY_RUN')
         ? (['DRY_RUN', 'TEST_FIXTURE'] as const).filter(
-            (mode) => !row.executions.some((e) => e.mode === mode),
+            (mode) =>
+              !(
+                mode === 'DRY_RUN' &&
+                safeSummary.executionReadiness?.browserAssisted
+              ) && !row.executions.some((e) => e.mode === mode),
           )
         : safeSummary.executionReadiness?.state === 'READY' &&
             settings.allowRealExecution &&
@@ -709,6 +736,7 @@ export function registerApplicationRoutes(
     authSecret?: string;
     executionFixtureOrigin?: string;
     allowRealExecution?: boolean;
+    ashbyBrowserAssisted?: boolean;
     autoSubmit?: boolean;
     autoSubmitSince?: string;
   },

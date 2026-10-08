@@ -45,6 +45,7 @@ const source = config.CAREERLIFT_MCP_URL
       config.CAREERLIFT_API_KEY,
     );
 const app = createApp({
+  ashbyBrowserAssisted: config.ASHBY_BROWSER_ASSISTED_ENABLED === 'true',
   answerConfidenceThreshold: config.ANSWER_CONFIDENCE_THRESHOLD_PERCENT / 100,
   ...(config.ANSWER_PROVIDER === 'GEMINI' && config.GEMINI_API_KEY
     ? {

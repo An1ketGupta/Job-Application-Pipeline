@@ -32,6 +32,7 @@ import {
 import { mutateBoundField, pinField } from './field-mutation.js';
 import { suspendPageScripts } from './trusted-dom.js';
 import { AshbyApplicationExecutor } from './ashby-executor.js';
+import { AshbyAssistedExecutor } from './ashby-assisted.js';
 import {
   bindContract,
   contractDigest,
@@ -74,14 +75,23 @@ export interface BrowserExecutorOptions {
   ) => Pick<BrowserSessionManager, 'create' | 'networkPolicy'>;
   pauseTtlMs?: number;
   receiptTimeoutMs?: number;
+  ashbyBrowserAssisted?: boolean;
+  assistedHeadless?: boolean;
+  assistedSessions?: (
+    policy: BrowserNetworkPolicy,
+  ) => Pick<BrowserSessionManager, 'create'>;
 }
 export class BrowserApplicationExecutor implements ApplicationExecutor {
   private readonly retained = new Map<string, RetainedSession>();
-  constructor(private readonly options: BrowserExecutorOptions) {}
+  private readonly ashbyAssisted: AshbyAssistedExecutor;
+  constructor(private readonly options: BrowserExecutorOptions) {
+    this.ashbyAssisted = new AshbyAssistedExecutor(options);
+  }
   canHandle(plan: ApplicationPlan) {
     return plan.executor === 'BROWSER' && !plan.requiresHumanReview;
   }
   async close() {
+    await this.ashbyAssisted.close();
     for (const entry of this.retained.values()) {
       clearTimeout(entry.timer);
       await entry.session.close();
@@ -92,8 +102,14 @@ export class BrowserApplicationExecutor implements ApplicationExecutor {
     raw: ExecutionInput,
     observer?: ExecutionObserver,
   ): Promise<ExecutionResult> {
-    if (raw.inspection.ashbySubmission && !raw.inspection.executionFlow)
+    if (raw.inspection.ashbySubmission && !raw.inspection.executionFlow) {
+      if (
+        raw.inspection.ashbySubmission.requiresCaptcha &&
+        this.options.ashbyBrowserAssisted
+      )
+        return this.ashbyAssisted.execute(raw, observer);
       return new AshbyApplicationExecutor(this.options).execute(raw, observer);
+    }
     const started = Date.now();
     let result: ExecutionResult = {
       applicationId: raw.applicationId,

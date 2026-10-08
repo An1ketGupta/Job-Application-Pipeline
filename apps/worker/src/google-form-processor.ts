@@ -750,6 +750,7 @@ export function createGoogleFormProcessor(
             ...(submissionObservation ?? {}),
             dispatchStarted: submitStarted,
             errorCode: code,
+            ...(networkFailure ? { networkFailure } : {}),
           } as Prisma.InputJsonValue,
         },
       });

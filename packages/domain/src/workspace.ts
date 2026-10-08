@@ -98,6 +98,7 @@ export const ApplicationSummarySchema = z
         ]),
         reason: z.string().nullable(),
         automatic: z.boolean(),
+        browserAssisted: z.boolean().optional(),
       })
       .strict()
       .optional(),

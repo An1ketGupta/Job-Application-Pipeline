@@ -16,6 +16,7 @@ import type { ApplicationDetail } from './lib/types';
 import { ApplicationSummarySchema } from '@careerlift/domain';
 import { GoogleFormSubmissionFlag } from './components/applications/GoogleFormSubmissionFlag';
 import { ApplicationPreparationActions } from './components/candidate/ApplicationPreparationActions';
+import { ApplicationExecutionActions } from './components/candidate/ApplicationExecutionActions';
 const at = '2026-10-07T10:00:00.000Z';
 describe('Google Forms submission flags', () => {
   it.each([
@@ -98,6 +99,44 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('Application workspace presentation', () => {
+  it('exposes Ashby browser start and continuation controls without allowing continuation of an uncertain submission', () => {
+    const app: ApplicationDetail = {
+      ...base,
+      plan: {
+        applicationType: 'EXTERNAL_ATS',
+        provider: 'ASHBY',
+        platform: 'ASHBY',
+        requiresHumanReview: false,
+        createdAt: at,
+      },
+      executionReadiness: {
+        state: 'READY',
+        reason: null,
+        automatic: false,
+        browserAssisted: true,
+      },
+      executionModes: ['REAL_EXECUTION'],
+    };
+    const render = () =>
+      renderToString(
+        <ApplicationExecutionActions
+          application={app}
+          token="owned-token"
+          refresh={() => {}}
+        />,
+      );
+    expect(render()).toContain('Open assisted Ashby browser');
+    app.executionModes = [];
+    app.execution = {
+      ...execution,
+      state: 'PAUSED_HUMAN_REQUIRED',
+      verification: null,
+    };
+    expect(render()).toContain('Continue Ashby application');
+    app.execution.state = 'SUBMISSION_UNKNOWN';
+    expect(render()).not.toContain('Continue Ashby application');
+    expect(render()).toContain('Check independent verification');
+  });
   it('shows inspection recovery without claiming execution failed or asking for candidate answers', () => {
     const app: ApplicationDetail = {
       ...base,

@@ -19,6 +19,9 @@ export function ApplicationExecutionActions({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const modes = app.executionModes ?? [];
+  const assisted = !!app.executionReadiness?.browserAssisted;
+  const canResume =
+    assisted && app.execution?.state === 'PAUSED_HUMAN_REQUIRED';
   const verification = app.execution?.verification;
   const canCheck =
     app.execution &&
@@ -33,6 +36,7 @@ export function ApplicationExecutionActions({
       | 'DRY_RUN'
       | 'TEST_FIXTURE'
       | 'REAL_EXECUTION'
+      | 'resume'
       | 'check'
       | 'confirm'
       | 'reject',
@@ -64,6 +68,23 @@ export function ApplicationExecutionActions({
         );
         setSuccess(
           `${operation} requested. The worker will check the application before execution.`,
+        );
+      } else if (operation === 'resume') {
+        const execution = await request<{ executionId: string }>(
+          `/api/v1/applications/${encodeURIComponent(app.id)}/execution?mode=${app.execution!.mode}`,
+          { cache: 'no-store' },
+          token,
+        );
+        await request(
+          `/api/v1/applications/${encodeURIComponent(app.id)}/execution/resume`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ executionId: execution.executionId }),
+          },
+          token,
+        );
+        setSuccess(
+          'Continuation requested. The worker will check verification before submitting.',
         );
       } else {
         const execution = await request<{ executionId: string }>(
@@ -100,7 +121,14 @@ export function ApplicationExecutionActions({
     }
   }
   if (app.googleForm || app.plan?.platform === 'GOOGLE_FORM') return null;
-  if (!modes.length && !canCheck && !canDecide && !success && !error)
+  if (
+    !modes.length &&
+    !canResume &&
+    !canCheck &&
+    !canDecide &&
+    !success &&
+    !error
+  )
     return app.preparation?.state === 'COMPLETED' &&
       app.plan?.applicationType !== 'EMAIL' ? (
       <SubmissionPreview applicationId={app.id} token={token} />
@@ -110,9 +138,13 @@ export function ApplicationExecutionActions({
       <h2 className="font-bold">
         {modes.length
           ? modes.includes('REAL_EXECUTION')
-            ? 'Submit application'
+            ? assisted
+              ? 'Ashby browser assistance'
+              : 'Submit application'
             : 'Controlled local execution'
-          : 'Resolve submission outcome'}
+          : canResume
+            ? 'Continue Ashby application'
+            : 'Resolve submission outcome'}
       </h2>
       <Feedback busy={busy} error={error} success={success} />
       {app.preparation?.state === 'COMPLETED' && (
@@ -123,9 +155,11 @@ export function ApplicationExecutionActions({
       {!!modes.length && (
         <>
           <p className="mt-3 text-sm text-slate-600">
-            {modes.includes('REAL_EXECUTION')
-              ? `The worker will send your prepared answers and selected documents to ${app.job.company}. Check them before submitting. Each application is submitted once.`
-              : 'These controls use the configured local test system. DRY_RUN submits nothing. TEST_FIXTURE can submit once after the existing safety checks pass.'}
+            {assisted
+              ? 'A dedicated browser will open on the worker’s computer and fill your prepared answers and résumé. Click the employer Submit button and complete any verification yourself, then return here and continue to submit.'
+              : modes.includes('REAL_EXECUTION')
+                ? `The worker will send your prepared answers and selected documents to ${app.job.company}. Check them before submitting. Each application is submitted once.`
+                : 'These controls use the configured local test system. DRY_RUN submits nothing. TEST_FIXTURE can submit once after the existing safety checks pass.'}
           </p>
           {(modes.includes('TEST_FIXTURE') ||
             modes.includes('REAL_EXECUTION')) && (
@@ -150,7 +184,9 @@ export function ApplicationExecutionActions({
                 disabled={busy || !confirmed}
                 onClick={() => void act('REAL_EXECUTION')}
               >
-                Submit application
+                {assisted
+                  ? 'Open assisted Ashby browser'
+                  : 'Submit application'}
               </button>
             )}
             {modes.includes('DRY_RUN') && (
@@ -173,6 +209,24 @@ export function ApplicationExecutionActions({
             )}
           </div>
         </>
+      )}
+      {canResume && (
+        <div className="mt-4">
+          <p className="text-sm text-slate-600">
+            {app.execution?.issue ??
+              'Complete verification in the open employer browser, then continue here.'}{' '}
+            Continue promptly after verification. If the browser session ended,
+            continuing opens a new browser and restores your prepared
+            application.
+          </p>
+          <button
+            className={`${button} mt-3`}
+            disabled={busy}
+            onClick={() => void act('resume')}
+          >
+            Continue Ashby application
+          </button>
+        </div>
       )}
       {canCheck && (
         <button

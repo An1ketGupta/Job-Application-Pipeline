@@ -80,6 +80,7 @@ const emailTask = createEmailProcessor(
   new LocalDocumentStorage(resolveDocumentRoot(config.EXECUTION_DOCUMENT_ROOT)),
 );
 const browserExecutor = new BrowserApplicationExecutor({
+  ashbyBrowserAssisted: config.ASHBY_BROWSER_ASSISTED_ENABLED === 'true',
   documents: new LocalDocumentStorage(
     resolveDocumentRoot(config.EXECUTION_DOCUMENT_ROOT),
   ),

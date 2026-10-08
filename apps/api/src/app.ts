@@ -46,6 +46,7 @@ type Dependencies = GoogleFormDependencies & {
   policy?: BrowserNetworkPolicy;
   executionFixtureOrigin?: string;
   allowRealExecution?: boolean;
+  ashbyBrowserAssisted?: boolean;
   autoSubmit?: boolean;
   autoSubmitSince?: string;
   source?: CareerLiftJobSource;

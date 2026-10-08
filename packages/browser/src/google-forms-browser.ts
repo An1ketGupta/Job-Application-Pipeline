@@ -127,6 +127,12 @@ export function googleFormsBackgroundRequest(
   method: string,
   canonical: string,
 ) {
+  // Google creates local URLs for cached font assets. Blocking them must
+  // not record a failed form request or prevent an attachment from completing.
+  if (['GET', 'HEAD'].includes(method))
+    return /^(?:blob|filesystem):https:\/\/docs\.google\.com\/persistent\/docs\/fonts\/[^?#]+\.woff2$/.test(
+      value,
+    );
   if (method !== 'POST') return false;
   const url = new URL(value);
   if (url.protocol !== 'https:') return false;
@@ -429,6 +435,19 @@ export class GoogleFormsBrowser {
             );
           else await route.continue();
         } catch (error) {
+          if (
+            ['GET', 'HEAD'].includes(request.method()) &&
+            error instanceof Error &&
+            !(error instanceof InspectionError) &&
+            /^(?:Frame for this navigation request is not available|route\.continue: (?:Target page, context or browser has been closed|Target closed))/.test(
+              error.message,
+            )
+          ) {
+            // Attachment previews open a popup, which this context closes.
+            // Its cancelled read must not poison the main form's workflow.
+            await route.abort().catch(() => {});
+            return;
+          }
           instance.policy.denied =
             error instanceof InspectionError
               ? error.code
@@ -654,6 +673,18 @@ export class GoogleFormsBrowser {
               : undefined;
           return {
             label,
+            informational:
+              element.classList.contains('Qr7Oae') &&
+              type === null &&
+              entries.length === 0 &&
+              !name &&
+              !controls.length &&
+              !radios.length &&
+              !boxes.length &&
+              !upload &&
+              !element.querySelector(
+                'iframe,canvas,[contenteditable="true"],[role="slider"]',
+              ),
             required,
             kind,
             options: [...new Set(options)],
@@ -683,7 +714,7 @@ export class GoogleFormsBrowser {
                 : [],
           };
         });
-        if (!raw.label) continue;
+        if (!raw.label || raw.informational) continue;
         const baseId =
           raw.name ||
           (typeof raw.itemId === 'number'
@@ -1103,9 +1134,45 @@ export class GoogleFormsBrowser {
       const input = await container.$('input[type="file"]');
       if (input) await input.setInputFiles(file);
       else {
-        const add = await container.$('[role="button"],button');
-        if (!add) throw new Error('GOOGLE_FORMS_UPLOAD_REQUIRES_BROWSER');
-        if (!(await this.pickerIsOpen())) await add.click();
+        if (!(await this.pickerIsOpen())) {
+          // A restored draft can contain an attachment whose bytes this browser
+          // has not verified. Replace it with the approved document before binding
+          // its file ID; the first button may be Open file, not Add File.
+          const restored = await container.$$(
+            '[role="button"][aria-label="Remove file" i],button[aria-label="Remove file" i]',
+          );
+          for (const remove of restored) await remove.click();
+          if (restored.length)
+            await this.page.waitForFunction(
+              (element) =>
+                !element.querySelector(
+                  '[role="button"][aria-label="Remove file" i],button[aria-label="Remove file" i]',
+                ),
+              container,
+            );
+          const matches: Control[] = [];
+          for (const button of (await container.$$(
+            '[role="button"],button',
+          )) as Control[]) {
+            if (
+              await button.evaluate((element) =>
+                /^(?:add|upload) file$/i.test(
+                  (
+                    element.getAttribute('aria-label') ||
+                    element.textContent ||
+                    ''
+                  )
+                    .trim()
+                    .replace(/\s+/g, ' '),
+                ),
+              )
+            )
+              matches.push(button);
+          }
+          if (matches.length !== 1)
+            throw new Error('GOOGLE_FORMS_UPLOAD_REQUIRES_BROWSER');
+          await matches[0]!.click();
+        }
         const picker = await this.selectPickerFile(file);
         if (this.policy.denied) throw new Error(this.policy.denied);
         await this.completePickerUpload(
@@ -1405,22 +1472,42 @@ export class GoogleFormsBrowser {
     try {
       await this.control('Next').click();
       await this.page.waitForLoadState('domcontentloaded');
+      let candidate: string | null = null;
       for (let attempt = 0; attempt < 40; attempt++) {
         if (this.policy.denied) throw new Error(this.policy.denied);
-        const next = await this.inspect();
-        if (
-          next.fingerprint !== previous &&
-          (next.next || next.submit || next.authentication || next.challenge)
-        )
-          return next;
-        if (
-          await this.page
-            .locator(
-              '[aria-invalid="true"],input:invalid,textarea:invalid,select:invalid',
+        try {
+          const next = await this.inspect();
+          if (
+            next.fingerprint !== previous &&
+            (next.next || next.submit || next.authentication || next.challenge)
+          ) {
+            // Hydration and delayed navigation can replace the DOM after Next.
+            // Read the new section twice before handing its controls to the worker.
+            if (candidate === next.fingerprint) return next;
+            candidate = next.fingerprint;
+          } else {
+            candidate = null;
+            if (
+              next.fingerprint === previous &&
+              (await this.page
+                .locator(
+                  '[aria-invalid="true"],input:invalid,textarea:invalid,select:invalid',
+                )
+                .count())
             )
-            .count()
-        )
-          throw new Error('GOOGLE_FORMS_VALIDATION_FAILED');
+              throw new Error('GOOGLE_FORMS_VALIDATION_FAILED');
+          }
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !/Execution context was destroyed|Cannot find context with specified id|Frame was detached|Frame has been detached|Element is not attached to the DOM|JSHandle is disposed/i.test(
+              error.message,
+            )
+          )
+            throw error;
+          // Retry only DOM reads invalidated by the transition, never the Next POST.
+          candidate = null;
+        }
         await this.page.waitForTimeout(250);
       }
       throw new Error('GOOGLE_FORMS_SECTION_DID_NOT_ADVANCE');

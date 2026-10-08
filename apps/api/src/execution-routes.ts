@@ -30,6 +30,7 @@ export type ExecutionRouteDependencies = {
   policy?: BrowserNetworkPolicy;
   executionFixtureOrigin?: string;
   allowRealExecution?: boolean;
+  ashbyBrowserAssisted?: boolean;
 };
 export function registerExecutionRoutes(
   app: FastifyInstance,
@@ -214,6 +215,7 @@ export function registerExecutionRoutes(
           )
             throw new Error('LOCAL_FIXTURE_REQUIRED');
           await validateExecutionTarget(input, {
+            ashbyBrowserAssisted: dependencies.ashbyBrowserAssisted ?? false,
             ...(dependencies.policy ? { policy: dependencies.policy } : {}),
             ...(dependencies.executionFixtureOrigin
               ? { fixtureOrigin: dependencies.executionFixtureOrigin }

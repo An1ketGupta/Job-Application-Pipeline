@@ -41,6 +41,7 @@ const ConfigSchema = z.object({
     .default('gemini-3.5-flash-lite'),
   BROWSER_HEADLESS: z.enum(['true', 'false']).default('true'),
   GOOGLE_FORMS_ENABLED: z.enum(['true', 'false']).default('false'),
+  ASHBY_BROWSER_ASSISTED_ENABLED: z.enum(['true', 'false']).default('true'),
   GOOGLE_FORMS_ACCOUNT: z
     .string()
     .email()

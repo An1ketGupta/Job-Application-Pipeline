@@ -44,9 +44,10 @@ export type AshbySubmission = z.infer<typeof AshbySubmissionSchema>;
 
 export function ashbySubmissionBlocker(
   submission: AshbySubmission,
+  allowBrowserAssistance = false,
 ): string | null {
   if (submission.surveyCount) return 'ASHBY_SURVEY_REVIEW_REQUIRED';
-  if (submission.requiresCaptcha) return 'CAPTCHA';
+  if (submission.requiresCaptcha && !allowBrowserAssistance) return 'CAPTCHA';
   if (
     submission.fields.some(
       (f) =>
