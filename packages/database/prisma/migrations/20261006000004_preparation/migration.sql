@@ -1,0 +1,13 @@
+CREATE TYPE "PreparationState" AS ENUM ('PENDING', 'RUNNING', 'COMPLETED', 'HUMAN_REQUIRED', 'FAILED');
+CREATE TABLE "ApplicationProfile" ("userId" TEXT NOT NULL, "data" JSONB NOT NULL, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "ApplicationProfile_pkey" PRIMARY KEY ("userId"));
+CREATE TABLE "VerifiedAnswer" ("id" TEXT NOT NULL, "userId" TEXT NOT NULL, "category" TEXT NOT NULL, "value" TEXT NOT NULL, "source" TEXT NOT NULL DEFAULT 'USER_VERIFIED', "verifiedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "VerifiedAnswer_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "VerifiedAnswer_userId_category_key" ON "VerifiedAnswer"("userId", "category");
+CREATE TABLE "UserDocument" ("id" TEXT NOT NULL, "userId" TEXT NOT NULL, "type" TEXT NOT NULL, "name" TEXT NOT NULL, "storageRef" TEXT NOT NULL, "mimeType" TEXT NOT NULL, "size" INTEGER NOT NULL, "metadata" JSONB NOT NULL DEFAULT '{}', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "UserDocument_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "UserDocument_userId_type_idx" ON "UserDocument"("userId", "type");
+CREATE TABLE "ApplicationPreparation" ("id" TEXT NOT NULL, "applicationId" TEXT NOT NULL, "inspectionId" TEXT NOT NULL, "state" "PreparationState" NOT NULL DEFAULT 'PENDING', "version" INTEGER NOT NULL DEFAULT 1, "result" JSONB, "errorCode" TEXT, "runId" TEXT, "startedAt" TIMESTAMP(3), "completedAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "ApplicationPreparation_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "ApplicationPreparation_applicationId_key" ON "ApplicationPreparation"("applicationId");
+ALTER TABLE "ApplicationProfile" ADD CONSTRAINT "ApplicationProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "VerifiedAnswer" ADD CONSTRAINT "VerifiedAnswer_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "UserDocument" ADD CONSTRAINT "UserDocument_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ApplicationPreparation" ADD CONSTRAINT "ApplicationPreparation_applicationId_fkey" FOREIGN KEY ("applicationId") REFERENCES "Application"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ApplicationPreparation" ADD CONSTRAINT "ApplicationPreparation_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "ApplicationInspection"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

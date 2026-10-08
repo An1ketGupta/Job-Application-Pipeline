@@ -1,0 +1,30 @@
+{
+  "name": "@careerlift/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@careerlift/application-resolver": "workspace:*",
+    "@careerlift/browser": "workspace:*",
+    "@careerlift/database": "workspace:*",
+    "@careerlift/config": "workspace:*",
+    "@careerlift/domain": "workspace:*",
+    "@careerlift/email": "workspace:*",
+    "@careerlift/logging": "workspace:*",
+    "@careerlift/validation": "workspace:*",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.0.0",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0",
+    "zod": "3.24.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0"
+  }
+}

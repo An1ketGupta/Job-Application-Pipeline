@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "lib": ["ES2022", "DOM"] },
+  "include": [
+    "packages/email/src/**/*.ts",
+    "packages/domain/src/email.ts",
+    "packages/domain/src/email.test.ts",
+    "apps/api/src/email-routes.ts",
+    "apps/api/src/candidate-routes.ts",
+    "apps/worker/src/email-processor.ts"
+  ]
+}

@@ -1,0 +1,477 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApplicationState {
+  DISCOVERED
+  ANALYZING
+  RESOLVED
+  READY
+  EXECUTING
+  VERIFYING
+  SUBMITTED
+  FAILED
+  BLOCKED
+  HUMAN_REQUIRED
+}
+
+enum ApplicationEventType {
+  JOB_DISCOVERED
+  APPLICATION_ANALYSIS_STARTED
+  APPLICATION_RESOLVED
+  APPLICATION_RESOLUTION_FAILED
+  HUMAN_REVIEW_REQUIRED
+  APPLICATION_EXECUTION_STARTED
+  APPLICATION_SUBMITTED
+  APPLICATION_FAILED
+  APPLICATION_INSPECTION_STARTED
+  APPLICATION_INSPECTED
+  APPLICATION_INSPECTION_FAILED
+  PROFILE_UPDATED
+  DOCUMENT_UPLOADED
+  DOCUMENT_UPDATED
+  DOCUMENT_ARCHIVED
+  VERIFIED_ANSWER_UPDATED
+  HUMAN_REVIEW_RESOLVED
+  HUMAN_REVIEW_REJECTED
+  PREPARATION_SNAPSHOT
+}
+
+enum InspectionState {
+  PENDING
+  RUNNING
+  COMPLETED
+  HUMAN_REQUIRED
+  FAILED
+}
+
+enum PreparationState {
+  PENDING
+  RUNNING
+  COMPLETED
+  HUMAN_REQUIRED
+  FAILED
+}
+
+enum ExecutionState {
+  PENDING
+  PREPARING
+  RUNNING
+  PAUSED_HUMAN_REQUIRED
+  SUBMITTING
+  SUBMITTED
+  SUBMISSION_UNKNOWN
+  DRY_RUN_COMPLETED
+  FAILED
+  BLOCKED
+}
+
+model User {
+  id                String              @id @default(cuid())
+  email             String              @unique
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  applications      Application[]
+  profile           ApplicationProfile?
+  verifiedAnswers   VerifiedAnswer[]
+  documents         UserDocument[]
+  emailAccount      EmailAccount?
+  emailPreferences  EmailPreferences?
+  emailOAuthStates  EmailOAuthState[]
+  emailMessages     EmailMessage[]
+  googleFormRuns    GoogleFormRun[]
+  googleFormSession GoogleFormSession?
+}
+
+model ApplicationProfile {
+  userId    String   @id
+  data      Json
+  revision  Int      @default(1)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model VerifiedAnswer {
+  id          String   @id @default(cuid())
+  userId      String
+  category    String
+  question    String   @default("")
+  questionKey String   @default("")
+  value       String
+  source      String   @default("USER_VERIFIED")
+  verifiedAt  DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  active      Boolean  @default(true)
+  revision    Int      @default(1)
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, category, questionKey])
+}
+
+model UserDocument {
+  id         String    @id @default(cuid())
+  userId     String
+  type       String
+  name       String
+  storageRef String
+  mimeType   String
+  size       Int
+  metadata   Json      @default("{}")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @default(now()) @updatedAt
+  archivedAt DateTime?
+  isDefault  Boolean   @default(false)
+  revision   Int       @default(1)
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, type])
+}
+
+model Job {
+  id              String        @id
+  externalId      String
+  source          String
+  company         String
+  title           String
+  location        String?
+  employmentType  String?
+  description     String?
+  requirements    Json
+  applicationInfo Json?
+  sourceUrl       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  applications    Application[]
+
+  @@unique([source, externalId])
+}
+
+model Application {
+  id            String                  @id @default(cuid())
+  userId        String
+  jobId         String
+  state         ApplicationState        @default(DISCOVERED)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  user          User                    @relation(fields: [userId], references: [id])
+  job           Job                     @relation(fields: [jobId], references: [id])
+  plan          ApplicationPlan?
+  events        ApplicationEvent[]
+  inspection    ApplicationInspection?
+  preparation   ApplicationPreparation?
+  executions    ApplicationExecution[]
+  emailMessage  EmailMessage?
+  googleFormRun GoogleFormRun?
+
+  @@index([userId, state])
+}
+
+enum EmailMessageState {
+  DRAFT
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  UNKNOWN
+  CANCELLED
+}
+
+model GoogleFormSession {
+  userId         String   @id
+  state          String   @default("DISCONNECTED")
+  account        String
+  encryptedState String?
+  generation     Int      @default(1)
+  errorCode      String?
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GoogleFormRun {
+  id              String      @id @default(cuid())
+  applicationId   String      @unique
+  userId          String
+  state           String      @default("PENDING")
+  version         Int         @default(1)
+  runId           String?
+  page            Int         @default(0)
+  snapshot        Json?
+  submitStartedAt DateTime?
+  submittedAt     DateTime?
+  confirmation    Json?
+  errorCode       String?
+  test            Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, state])
+  @@index([state, updatedAt])
+}
+
+model EmailAccount {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  address               String
+  encryptedRefreshToken String?
+  connected             Boolean  @default(true)
+  version               Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EmailPreferences {
+  userId    String   @id
+  data      Json
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EmailOAuthState {
+  hash      String   @id
+  userId    String
+  verifier  String
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model EmailMessage {
+  id                String            @id @default(cuid())
+  userId            String
+  applicationId     String?           @unique
+  planId            String?
+  purpose           String
+  state             EmailMessageState @default(DRAFT)
+  revision          Int               @default(1)
+  accountVersion    Int
+  from              String
+  to                String
+  subject           String
+  senderName        String            @default("")
+  body              String
+  attachments       Json              @default("[]")
+  runId             String?
+  providerMessageId String?
+  errorCode         String?
+  queuedAt          DateTime?
+  startedAt         DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application       Application?      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([state, updatedAt])
+  @@index([userId, createdAt])
+}
+
+model ApplicationExecution {
+  id                 String                  @id @default(cuid())
+  applicationId      String
+  applicationPlanId  String
+  inspectionId       String
+  preparationId      String
+  preparationVersion Int
+  inputHash          String
+  mode               String
+  state              ExecutionState          @default(PENDING)
+  result             Json?
+  runId              String?
+  generation         Int                     @default(1)
+  errorCode          String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  application        Application             @relation(fields: [applicationId], references: [id])
+  verification       SubmissionVerification?
+
+  @@unique([applicationId, mode])
+  @@index([state, updatedAt])
+}
+
+enum VerificationState {
+  NOT_REQUIRED
+  PENDING
+  VERIFYING
+  CONFIRMED
+  REJECTED
+  UNKNOWN
+  HUMAN_REQUIRED
+  FAILED
+}
+
+enum VerificationEvidenceType {
+  HTTP_SUCCESS
+  HTTP_RESPONSE
+  HTTP_REDIRECT
+  CONFIRMATION_PAGE
+  CONFIRMATION_IDENTIFIER
+  RECEIPT
+  APPLICATION_ID
+  STATUS_PAGE
+  USER_CONFIRMED
+  USER_CONFIRMED_REJECTED
+  EXTERNAL_LOOKUP
+}
+
+enum EvidenceStrength {
+  STRONG
+  MEDIUM
+  WEAK
+  NONE
+}
+
+model SubmissionVerification {
+  id                     String                   @id @default(cuid())
+  executionId            String                   @unique
+  mutationId             String
+  context                Json
+  state                  VerificationState        @default(PENDING)
+  // Last established outcome survives failed refreshes and worker crashes.
+  establishedState       VerificationState?
+  reason                 String?
+  generation             Int                      @default(1)
+  runId                  String?
+  leaseUntil             DateTime?
+  infrastructureFailures Int                      @default(0)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  execution              ApplicationExecution     @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  attempts               VerificationAttempt[]
+  evidence               VerificationEvidence[]
+  events                 VerificationAuditEvent[]
+
+  @@index([state, leaseUntil])
+}
+
+model VerificationAttempt {
+  id             String                 @id
+  verificationId String
+  generation     Int
+  strategy       String
+  target         String?
+  startedAt      DateTime               @default(now())
+  completedAt    DateTime?
+  result         VerificationState?
+  errorCode      String?
+  verification   SubmissionVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  evidence       VerificationEvidence[]
+
+  @@unique([id, verificationId])
+  @@index([verificationId, generation])
+}
+
+model VerificationEvidence {
+  id             String                   @id @default(cuid())
+  verificationId String
+  attemptId      String?
+  fingerprint    String
+  type           VerificationEvidenceType
+  strength       EvidenceStrength
+  data           Json
+  capturedAt     DateTime
+  verification   SubmissionVerification   @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  attempt        VerificationAttempt?     @relation(fields: [attemptId, verificationId], references: [id, verificationId], onDelete: Cascade)
+
+  @@unique([verificationId, fingerprint])
+  @@index([verificationId, capturedAt])
+}
+
+model VerificationAuditEvent {
+  id             String                 @id @default(cuid())
+  verificationId String
+  key            String
+  type           String
+  actorId        String?
+  data           Json
+  createdAt      DateTime               @default(now())
+  verification   SubmissionVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@unique([verificationId, key])
+  @@index([verificationId, createdAt])
+}
+
+model ApplicationPreparation {
+  id              String                @id @default(cuid())
+  applicationId   String                @unique
+  inspectionId    String
+  state           PreparationState      @default(PENDING)
+  version         Int                   @default(1)
+  result          Json?
+  reviewDecisions Json                  @default("[]")
+  inputSnapshot   Json?
+  errorCode       String?
+  runId           String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  application     Application           @relation(fields: [applicationId], references: [id])
+  inspection      ApplicationInspection @relation(fields: [inspectionId], references: [id])
+}
+
+model ApplicationPlan {
+  id                  String                 @id @default(cuid())
+  applicationId       String                 @unique
+  applicationType     String
+  provider            String?
+  destination         Json
+  requirements        Json
+  actions             Json
+  executor            String
+  confidence          Float
+  requiresHumanReview Boolean
+  reasoning           Json
+  resolvedBy          String
+  createdAt           DateTime               @default(now())
+  application         Application            @relation(fields: [applicationId], references: [id])
+  inspection          ApplicationInspection?
+}
+
+model ApplicationInspection {
+  id                String                   @id @default(cuid())
+  applicationId     String                   @unique
+  applicationPlanId String                   @unique
+  state             InspectionState          @default(PENDING)
+  result            Json?
+  finalUrl          String?
+  errorCode         String?
+  runId             String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  application       Application              @relation(fields: [applicationId], references: [id])
+  plan              ApplicationPlan          @relation(fields: [applicationPlanId], references: [id])
+  preparations      ApplicationPreparation[]
+}
+
+model ApplicationEvent {
+  id            String               @id @default(cuid())
+  applicationId String?
+  type          ApplicationEventType
+  status        ApplicationState?
+  actorId       String?
+  data          Json                 @default("{}")
+  requestId     String?
+  attempt       Int                  @default(0)
+  jobId         String?
+  message       String?
+  errorCode     String?
+  createdAt     DateTime             @default(now())
+  application   Application?         @relation(fields: [applicationId], references: [id])
+
+  @@unique([applicationId, requestId, type, attempt])
+  @@index([applicationId, createdAt])
+  @@index([actorId, createdAt])
+}

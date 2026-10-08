@@ -1,0 +1,43 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": ".",
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "apps/api/src/google-forms.integration.test.ts",
+    "tests/support/google-forms-fixture.ts",
+    "packages/domain/src/google-forms.test.ts",
+    "packages/browser/src/google-forms-browser.test.ts",
+    "packages/browser/src/google-forms-ai.test.ts",
+    "packages/browser/src/google-session.test.ts",
+    "apps/api/src/email.integration.test.ts",
+    "packages/email/src/email.test.ts",
+    "packages/email/src/personalization.test.ts",
+    "packages/domain/src/email.test.ts",
+    "apps/api/src/local-mvp-e2e.integration.test.ts",
+    "tests/support/ats-fixture.ts",
+    "packages/browser/src/ats-integration.test.ts",
+    "packages/application-resolver/src/ats-adapters.test.ts",
+    "apps/api/src/ats-e2e.integration.test.ts",
+    "tests/support/candidate-fixture.ts",
+    "packages/domain/src/candidate.test.ts",
+    "apps/api/src/candidate.integration.test.ts",
+    "apps/api/src/candidate-e2e.integration.test.ts",
+    "apps/api/src/candidate-security.test.ts",
+    "tests/support/execution-fixture.ts",
+    "packages/domain/src/execution.test.ts",
+    "packages/browser/src/execution.test.ts",
+    "packages/browser/src/execution-hardening.test.ts",
+    "apps/api/src/execution.test.ts",
+    "apps/api/src/execution-pipeline.integration.test.ts",
+    "tests/support/verification-fixture.ts",
+    "packages/domain/src/verification.test.ts",
+    "packages/browser/src/verification.test.ts",
+    "apps/api/src/verification-pipeline.integration.test.ts",
+    "apps/api/src/applications-workspace.integration.test.ts"
+  ]
+}

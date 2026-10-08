@@ -1,0 +1,39 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "incremental": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "outDir": ".next/types",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/google-forms-build/types/**/*.ts",
+    ".next/google-forms-e2e/types/**/*.ts",
+    ".next/phase10-e2e/types/**/*.ts",
+    ".next/phase7-e2e/types/**/*.ts",
+    ".next/phase8-e2e/types/**/*.ts",
+    ".next/phase9-e2e/types/**/*.ts",
+    ".next/types/**/*.ts",
+    "next-env.d.ts",
+    ".next/google-forms-final-build/types/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

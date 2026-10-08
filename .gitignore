@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.next/
+coverage/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+packages/database/generated/
+apps/worker/documents/
+client_secret*.json
+
+# Local credentials, logs, caches, and test artifacts
+*.pem
+*.key
+*.log
+.cache/
+.turbo/
+playwright-report/
+test-results/
+docs/*-evidence/
+
+# Local editor and agent state
+.idea/
+.vscode/
+.agents/
+.codex/
+.DS_Store
+Thumbs.db
