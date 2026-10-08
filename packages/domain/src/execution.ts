@@ -479,6 +479,46 @@ export const ExecutionInputSchema = z
         ctx.addIssue({ code: 'custom', message: 'Missing mandatory value' });
     }
     const flow = schema.executionFlow;
+    const greenhouse = schema.greenhouseSubmission;
+    if (greenhouse) {
+      const target = plan.destination.target;
+      if (
+        schema.platform !== 'GREENHOUSE' ||
+        target?.platform !== 'GREENHOUSE' ||
+        target.boardToken !== greenhouse.boardToken ||
+        target.externalJobId !== greenhouse.jobId ||
+        greenhouse.fields.some((binding) => {
+          const field = schema.fields.find((f) => f.id === binding.fieldId);
+          return (
+            !field ||
+            (field.domId ?? field.name) !== binding.name ||
+            field.label !== binding.label ||
+            field.required !== binding.required ||
+            (binding.type === 'FILE'
+              ? field.type !== 'FILE'
+              : binding.type === 'SELECT'
+                ? field.type !== 'SELECT' ||
+                  JSON.stringify(
+                    field.selectOptions?.map(({ label, value }) => ({
+                      label,
+                      value,
+                    })),
+                  ) !== JSON.stringify(binding.options)
+                : !['TEXT', 'EMAIL', 'PHONE', 'URL', 'TEXTAREA'].includes(
+                    field.type,
+                  ))
+          );
+        }) ||
+        schema.fields.some(
+          (f) =>
+            f.required && !greenhouse.fields.some((b) => b.fieldId === f.id),
+        )
+      )
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Greenhouse definition binding mismatch',
+        });
+    }
     if (flow) {
       const ids = flow.pages.flatMap((p) => p.fieldIds);
       if (

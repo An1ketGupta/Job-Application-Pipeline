@@ -3,6 +3,7 @@ import { UrlSyntaxSchema } from './destination.js';
 import { ApplicationTypeSchema } from './schemas.js';
 import { ExecutionFlowSchema } from './execution-flow.js';
 import { AshbySubmissionSchema } from './ashby-submission.js';
+import { GreenhouseSubmissionSchema } from './greenhouse-submission.js';
 
 export const InspectionStateSchema = z.enum([
   'PENDING',
@@ -110,6 +111,7 @@ export const ApplicationFieldSchema = z
       .max(100)
       .optional(),
     htmlType: ShortText.optional(),
+    phoneFormat: z.literal('INTERNATIONAL').optional(),
     checkboxValue: ShortText.optional(),
     optionValue: ShortText.optional(),
     formId: z.string().optional(),
@@ -188,6 +190,7 @@ export const ApplicationSchemaSchema = z
     forms: z.array(InspectedFormSchema).max(100),
     executionFlow: ExecutionFlowSchema.optional(),
     ashbySubmission: AshbySubmissionSchema.optional(),
+    greenhouseSubmission: GreenhouseSubmissionSchema.optional(),
     authentication: z.object({ required: z.boolean() }).strict(),
     humanReview: z
       .object({ required: z.boolean(), reasons: z.array(ReviewReasonSchema) })
@@ -359,6 +362,37 @@ export function canRepairSubmissionInspection(inspection: {
     !parsed.data.executionFlow &&
     !parsed.data.authentication.required &&
     !parsed.data.humanReview.required
+  );
+}
+
+// Retry old Greenhouse parser outcomes through the complete network/security
+// inspection again. This never turns a prior failure into successful inspection.
+export function canRepairGreenhouseInspection(
+  inspection: {
+    id: string;
+    applicationPlanId: string;
+    state: string;
+    errorCode: string | null;
+    result: unknown;
+  },
+  provider: string | null | undefined,
+): boolean {
+  if (provider !== 'GREENHOUSE') return false;
+  const parsed = ApplicationSchemaSchema.safeParse(inspection.result);
+  if (parsed.success)
+    return (
+      inspection.state === 'COMPLETED' &&
+      parsed.data.inspectionId === inspection.id &&
+      parsed.data.applicationPlanId === inspection.applicationPlanId &&
+      parsed.data.platform === 'GREENHOUSE' &&
+      (parsed.data.inspectionMetadata.formParserVersion ?? 1) < 5
+    );
+  return (
+    inspection.result == null &&
+    inspection.state === 'HUMAN_REQUIRED' &&
+    ['MUTATING_REQUEST_BLOCKED', 'UNEXPECTED_NAVIGATION'].includes(
+      inspection.errorCode ?? '',
+    )
   );
 }
 

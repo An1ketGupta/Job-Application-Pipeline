@@ -81,6 +81,8 @@ const emailTask = createEmailProcessor(
 );
 const browserExecutor = new BrowserApplicationExecutor({
   ashbyBrowserAssisted: config.ASHBY_BROWSER_ASSISTED_ENABLED === 'true',
+  greenhouseBrowserAssisted:
+    config.GREENHOUSE_BROWSER_ASSISTED_ENABLED === 'true',
   documents: new LocalDocumentStorage(
     resolveDocumentRoot(config.EXECUTION_DOCUMENT_ROOT),
   ),

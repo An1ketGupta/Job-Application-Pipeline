@@ -1,5 +1,6 @@
 import {
   ashbySubmissionBlocker,
+  greenhouseSubmissionBlocker,
   type ExecutionInput,
 } from '@careerlift/domain';
 import {
@@ -15,8 +16,37 @@ export async function validateExecutionTarget(
     fixtureOrigin?: string;
     policy?: BrowserNetworkPolicy;
     ashbyBrowserAssisted?: boolean;
+    greenhouseBrowserAssisted?: boolean;
   },
 ) {
+  if (input.inspection.greenhouseSubmission) {
+    if (
+      input.plan.destination.target?.platform !== 'GREENHOUSE' ||
+      input.inspection.platform !== 'GREENHOUSE'
+    )
+      throw new InspectionError(
+        'UNSUPPORTED_APPLICATION_PLATFORM',
+        'The Greenhouse adapter does not match this application',
+      );
+    const blocker = greenhouseSubmissionBlocker(
+      input.inspection.greenhouseSubmission,
+      !!options.greenhouseBrowserAssisted || input.mode === 'DRY_RUN',
+    );
+    if (blocker)
+      throw new InspectionError(
+        blocker,
+        'The Greenhouse application needs browser assistance',
+      );
+    const base =
+      options.policy ??
+      new DestinationPolicy(
+        input.mode === 'REAL_EXECUTION' ? undefined : options.fixtureOrigin,
+      );
+    base.validateNavigation(input.inspection.finalUrl);
+    await base.validateAddress(input.inspection.finalUrl);
+    await base.validateAddress(input.inspection.greenhouseSubmission.submitUrl);
+    return;
+  }
   if (input.inspection.ashbySubmission && !input.inspection.executionFlow) {
     if (
       input.plan.destination.target?.platform !== 'ASHBY' ||

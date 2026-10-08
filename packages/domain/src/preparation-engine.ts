@@ -324,6 +324,11 @@ export function validFieldValue(
 ): value is string {
   if (!value?.trim()) return false;
   if (!field) return true;
+  if (
+    field.phoneFormat === 'INTERNATIONAL' &&
+    !/^\+[1-9]\d{6,14}$/.test(value.replace(/[\s().-]/g, ''))
+  )
+    return false;
   if (field.choiceGroup && field.type === 'CHECKBOX') {
     const selected = selectedChoiceLabels(value);
     return Boolean(

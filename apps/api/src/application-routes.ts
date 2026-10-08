@@ -13,6 +13,8 @@ import {
   canRepairChoiceInspection,
   canRepairSubmissionInspection,
   ashbySubmissionBlocker,
+  greenhouseSubmissionBlocker,
+  canRepairGreenhouseInspection,
   ApplicationPlanSchema,
 } from '@careerlift/domain';
 import { authenticateBearer } from './auth.js';
@@ -184,6 +186,22 @@ function inspectionReviewReasons(row: Row) {
 }
 function issue(code: string | null, state: string) {
   const explanations: Record<string, string> = {
+    GREENHOUSE_BROWSER_VERIFICATION_REQUIRED:
+      'In the open Greenhouse browser, click Submit application and complete any verification. Then return here and continue the application.',
+    GREENHOUSE_SESSION_REOPENED:
+      'Your prepared application was restored in a new Greenhouse browser. Complete verification there, then continue here.',
+    GREENHOUSE_SESSION_LOST:
+      'Continue to reopen the Greenhouse browser and restore your prepared application.',
+    GREENHOUSE_UNAPPROVED_VALUE:
+      'Greenhouse attempted to send an answer that differs from your prepared application. Review your answers before starting again.',
+    GREENHOUSE_FORM_CHANGED:
+      'The Greenhouse form changed. Reinspect it and prepare the updated requirements.',
+    GREENHOUSE_INTERNATIONAL_PHONE_REQUIRED:
+      'Update your phone number to include its country calling code, for example +91.',
+    GREENHOUSE_REQUEST_REJECTED:
+      'Greenhouse rejected the submission. Check the employer page before continuing.',
+    GREENHOUSE_UNSUPPORTED_FORM:
+      'This Greenhouse form includes additional controls that require manual completion.',
     ASHBY_BROWSER_VERIFICATION_REQUIRED:
       'In the open Ashby browser, click the employer Submit button and complete any verification. Then return here and continue the application.',
     ASHBY_SESSION_REOPENED:
@@ -292,6 +310,7 @@ function executionSummary(row: Row['executions'][number]) {
 type ExecutionSettings = {
   allowRealExecution?: boolean;
   ashbyBrowserAssisted?: boolean;
+  greenhouseBrowserAssisted?: boolean;
   autoSubmit?: boolean;
   autoSubmitSince?: string;
   executionFixtureOrigin?: string;
@@ -393,18 +412,30 @@ function summarize(row: Row, settings: ExecutionSettings = {}) {
     row.inspection?.result,
   );
   const browserAssisted =
-    !!settings.ashbyBrowserAssisted &&
     inspectedForExecution.success &&
-    !!inspectedForExecution.data.ashbySubmission?.requiresCaptcha &&
-    !inspectedForExecution.data.executionFlow;
+    ((!!settings.ashbyBrowserAssisted &&
+      !!inspectedForExecution.data.ashbySubmission?.requiresCaptcha &&
+      !inspectedForExecution.data.executionFlow) ||
+      (!!settings.greenhouseBrowserAssisted &&
+        !!inspectedForExecution.data.greenhouseSubmission));
   const code =
     inspectedForExecution.success && inspectedForExecution.data.ashbySubmission
       ? ashbySubmissionBlocker(
           inspectedForExecution.data.ashbySubmission,
           browserAssisted,
         )
-      : null;
+      : inspectedForExecution.success &&
+          inspectedForExecution.data.greenhouseSubmission
+        ? greenhouseSubmissionBlocker(
+            inspectedForExecution.data.greenhouseSubmission,
+            browserAssisted,
+          )
+        : null;
   const reasons: Record<string, string> = {
+    GREENHOUSE_UNSUPPORTED_FORM:
+      'This Greenhouse form includes surveys or controls that need manual completion on the employer site.',
+    GREENHOUSE_BROWSER_ASSISTANCE_REQUIRED:
+      'Enable Greenhouse browser assistance to complete verification and submit your prepared application.',
     CAPTCHA:
       'The employer requires reCAPTCHA. Complete this application on the employer site.',
     ASHBY_SURVEY_REVIEW_REQUIRED:
@@ -416,7 +447,8 @@ function summarize(row: Row, settings: ExecutionSettings = {}) {
     inspectedForExecution.success &&
     !!(
       inspectedForExecution.data.executionFlow ||
-      inspectedForExecution.data.ashbySubmission
+      inspectedForExecution.data.ashbySubmission ||
+      inspectedForExecution.data.greenhouseSubmission
     );
   const fixtureReady =
     settings.executionFixtureOrigin &&
@@ -627,7 +659,9 @@ function detail(
       fixtureOrigin &&
       inspected.success &&
       new URL(inspected.data.finalUrl).origin === fixtureOrigin &&
-      (inspected.data.executionFlow || inspected.data.ashbySubmission) &&
+      (inspected.data.executionFlow ||
+        inspected.data.ashbySubmission ||
+        inspected.data.greenhouseSubmission) &&
       safeSummary.executionReadiness?.state === 'READY' &&
       row.inspection?.state === 'COMPLETED' &&
       row.preparation?.state === 'COMPLETED' &&
@@ -663,7 +697,11 @@ function detail(
           canRetryEmptyInspection(row.inspection))) ||
         (!['PENDING', 'RUNNING'].includes(row.preparation?.state ?? '') &&
           (canRepairChoiceInspection(row.inspection) ||
-            canRepairSubmissionInspection(row.inspection)))),
+            canRepairSubmissionInspection(row.inspection) ||
+            canRepairGreenhouseInspection(
+              row.inspection,
+              row.plan?.provider,
+            )))),
     preparationAllowed:
       !!row.inspection &&
       inspected.success &&
@@ -737,6 +775,7 @@ export function registerApplicationRoutes(
     executionFixtureOrigin?: string;
     allowRealExecution?: boolean;
     ashbyBrowserAssisted?: boolean;
+    greenhouseBrowserAssisted?: boolean;
     autoSubmit?: boolean;
     autoSubmitSince?: string;
   },

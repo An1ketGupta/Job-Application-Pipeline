@@ -15,6 +15,7 @@ import {
   canRetryEmptyInspection,
   canRepairChoiceInspection,
   canRepairSubmissionInspection,
+  canRepairGreenhouseInspection,
   type AnswerGenerationProvider,
 } from '@careerlift/domain';
 import { Prisma, type PrismaClient } from '@careerlift/database';
@@ -47,6 +48,7 @@ type Dependencies = GoogleFormDependencies & {
   executionFixtureOrigin?: string;
   allowRealExecution?: boolean;
   ashbyBrowserAssisted?: boolean;
+  greenhouseBrowserAssisted?: boolean;
   autoSubmit?: boolean;
   autoSubmitSince?: string;
   source?: CareerLiftJobSource;
@@ -190,7 +192,11 @@ export function createApp(dependencies: Dependencies = {}): FastifyInstance {
     const repairChoices =
       !!application.inspection &&
       (canRepairChoiceInspection(application.inspection) ||
-        canRepairSubmissionInspection(application.inspection)) &&
+        canRepairSubmissionInspection(application.inspection) ||
+        canRepairGreenhouseInspection(
+          application.inspection,
+          application.plan.provider,
+        )) &&
       !['PENDING', 'RUNNING'].includes(application.preparation?.state ?? '') &&
       !application.executions?.length &&
       ['RESOLVED', 'READY'].includes(application.state);
@@ -297,7 +303,12 @@ export function createApp(dependencies: Dependencies = {}): FastifyInstance {
             ? {
                 applicationPlanId: application.plan.id,
                 errorCode: inspection.errorCode,
-                result: { equals: inspection.result as Prisma.InputJsonValue },
+                result: {
+                  equals:
+                    inspection.result == null
+                      ? Prisma.DbNull
+                      : (inspection.result as Prisma.InputJsonValue),
+                },
                 application: {
                   state: { in: ['RESOLVED', 'READY'] },
                   preparation: application.preparation

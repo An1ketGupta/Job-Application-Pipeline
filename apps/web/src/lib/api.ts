@@ -142,6 +142,18 @@ export async function request<T>(
         'The employer requires reCAPTCHA. Complete this application on the employer site.',
       ASHBY_BROWSER_VERIFICATION_REQUIRED:
         'Complete verification in the open employer browser, then continue here.',
+      GREENHOUSE_BROWSER_ASSISTANCE_REQUIRED:
+        'Greenhouse browser assistance is required to complete verification.',
+      GREENHOUSE_BROWSER_VERIFICATION_REQUIRED:
+        'Click Submit application and complete verification in the Greenhouse browser, then return here and continue.',
+      GREENHOUSE_INTERNATIONAL_PHONE_REQUIRED:
+        'Add the country calling code to your profile phone number, for example +91.',
+      GREENHOUSE_UNSUPPORTED_FORM:
+        'This Greenhouse form includes additional surveys or controls that require manual completion.',
+      GREENHOUSE_FORM_CHANGED:
+        'The Greenhouse form changed. Inspect and prepare it again.',
+      GREENHOUSE_UNAPPROVED_VALUE:
+        'The employer request differs from your prepared application. Review the saved answers before starting again.',
       ASHBY_SESSION_LOST:
         'The browser session ended. Continue to reopen it and restore prepared answers.',
       ASHBY_SURVEY_REVIEW_REQUIRED:

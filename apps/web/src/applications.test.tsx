@@ -99,44 +99,48 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('Application workspace presentation', () => {
-  it('exposes Ashby browser start and continuation controls without allowing continuation of an uncertain submission', () => {
-    const app: ApplicationDetail = {
-      ...base,
-      plan: {
-        applicationType: 'EXTERNAL_ATS',
-        provider: 'ASHBY',
-        platform: 'ASHBY',
-        requiresHumanReview: false,
-        createdAt: at,
-      },
-      executionReadiness: {
-        state: 'READY',
-        reason: null,
-        automatic: false,
-        browserAssisted: true,
-      },
-      executionModes: ['REAL_EXECUTION'],
-    };
-    const render = () =>
-      renderToString(
-        <ApplicationExecutionActions
-          application={app}
-          token="owned-token"
-          refresh={() => {}}
-        />,
-      );
-    expect(render()).toContain('Open assisted Ashby browser');
-    app.executionModes = [];
-    app.execution = {
-      ...execution,
-      state: 'PAUSED_HUMAN_REQUIRED',
-      verification: null,
-    };
-    expect(render()).toContain('Continue Ashby application');
-    app.execution.state = 'SUBMISSION_UNKNOWN';
-    expect(render()).not.toContain('Continue Ashby application');
-    expect(render()).toContain('Check independent verification');
-  });
+  it.each(['ASHBY', 'GREENHOUSE'] as const)(
+    'exposes %s browser controls and prevents continuation of uncertain submissions',
+    (platform) => {
+      const provider = platform === 'GREENHOUSE' ? 'Greenhouse' : 'Ashby';
+      const app: ApplicationDetail = {
+        ...base,
+        plan: {
+          applicationType: 'EXTERNAL_ATS',
+          provider: platform,
+          platform,
+          requiresHumanReview: false,
+          createdAt: at,
+        },
+        executionReadiness: {
+          state: 'READY',
+          reason: null,
+          automatic: false,
+          browserAssisted: true,
+        },
+        executionModes: ['REAL_EXECUTION'],
+      };
+      const render = () =>
+        renderToString(
+          <ApplicationExecutionActions
+            application={app}
+            token="owned-token"
+            refresh={() => {}}
+          />,
+        );
+      expect(render()).toContain(`Open assisted ${provider} browser`);
+      app.executionModes = [];
+      app.execution = {
+        ...execution,
+        state: 'PAUSED_HUMAN_REQUIRED',
+        verification: null,
+      };
+      expect(render()).toContain(`Continue ${provider} application`);
+      app.execution.state = 'SUBMISSION_UNKNOWN';
+      expect(render()).not.toContain(`Continue ${provider} application`);
+      expect(render()).toContain('Check independent verification');
+    },
+  );
   it('shows inspection recovery without claiming execution failed or asking for candidate answers', () => {
     const app: ApplicationDetail = {
       ...base,

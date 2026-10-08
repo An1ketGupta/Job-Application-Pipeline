@@ -20,6 +20,7 @@ export function ApplicationExecutionActions({
   const [success, setSuccess] = useState<string | null>(null);
   const modes = app.executionModes ?? [];
   const assisted = !!app.executionReadiness?.browserAssisted;
+  const provider = app.plan?.platform === 'GREENHOUSE' ? 'Greenhouse' : 'Ashby';
   const canResume =
     assisted && app.execution?.state === 'PAUSED_HUMAN_REQUIRED';
   const verification = app.execution?.verification;
@@ -139,11 +140,11 @@ export function ApplicationExecutionActions({
         {modes.length
           ? modes.includes('REAL_EXECUTION')
             ? assisted
-              ? 'Ashby browser assistance'
+              ? `${provider} browser assistance`
               : 'Submit application'
             : 'Controlled local execution'
           : canResume
-            ? 'Continue Ashby application'
+            ? `Continue ${provider} application`
             : 'Resolve submission outcome'}
       </h2>
       <Feedback busy={busy} error={error} success={success} />
@@ -185,7 +186,7 @@ export function ApplicationExecutionActions({
                 onClick={() => void act('REAL_EXECUTION')}
               >
                 {assisted
-                  ? 'Open assisted Ashby browser'
+                  ? `Open assisted ${provider} browser`
                   : 'Submit application'}
               </button>
             )}
@@ -224,7 +225,7 @@ export function ApplicationExecutionActions({
             disabled={busy}
             onClick={() => void act('resume')}
           >
-            Continue Ashby application
+            Continue {provider} application
           </button>
         </div>
       )}

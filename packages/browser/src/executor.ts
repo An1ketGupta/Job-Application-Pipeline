@@ -33,6 +33,7 @@ import { mutateBoundField, pinField } from './field-mutation.js';
 import { suspendPageScripts } from './trusted-dom.js';
 import { AshbyApplicationExecutor } from './ashby-executor.js';
 import { AshbyAssistedExecutor } from './ashby-assisted.js';
+import { GreenhouseApplicationExecutor } from './greenhouse-executor.js';
 import {
   bindContract,
   contractDigest,
@@ -76,6 +77,7 @@ export interface BrowserExecutorOptions {
   pauseTtlMs?: number;
   receiptTimeoutMs?: number;
   ashbyBrowserAssisted?: boolean;
+  greenhouseBrowserAssisted?: boolean;
   assistedHeadless?: boolean;
   assistedSessions?: (
     policy: BrowserNetworkPolicy,
@@ -84,14 +86,17 @@ export interface BrowserExecutorOptions {
 export class BrowserApplicationExecutor implements ApplicationExecutor {
   private readonly retained = new Map<string, RetainedSession>();
   private readonly ashbyAssisted: AshbyAssistedExecutor;
+  private readonly greenhouse: GreenhouseApplicationExecutor;
   constructor(private readonly options: BrowserExecutorOptions) {
     this.ashbyAssisted = new AshbyAssistedExecutor(options);
+    this.greenhouse = new GreenhouseApplicationExecutor(options);
   }
   canHandle(plan: ApplicationPlan) {
     return plan.executor === 'BROWSER' && !plan.requiresHumanReview;
   }
   async close() {
     await this.ashbyAssisted.close();
+    await this.greenhouse.close();
     for (const entry of this.retained.values()) {
       clearTimeout(entry.timer);
       await entry.session.close();
@@ -102,6 +107,14 @@ export class BrowserApplicationExecutor implements ApplicationExecutor {
     raw: ExecutionInput,
     observer?: ExecutionObserver,
   ): Promise<ExecutionResult> {
+    if (raw.inspection.greenhouseSubmission) {
+      if (!this.options.greenhouseBrowserAssisted && raw.mode !== 'DRY_RUN')
+        throw new InspectionError(
+          'GREENHOUSE_BROWSER_ASSISTANCE_REQUIRED',
+          'Enable Greenhouse browser assistance',
+        );
+      return this.greenhouse.execute(raw, observer);
+    }
     if (raw.inspection.ashbySubmission && !raw.inspection.executionFlow) {
       if (
         raw.inspection.ashbySubmission.requiresCaptcha &&

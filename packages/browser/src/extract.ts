@@ -448,6 +448,7 @@ export function classifyPage(raw: RawPageRepresentation) {
       : {}),
     options: field.options,
     ...(field.htmlType ? { htmlType: field.htmlType } : {}),
+    ...(field.phoneFormat ? { phoneFormat: field.phoneFormat } : {}),
     ...(field.selectOptions ? { selectOptions: field.selectOptions } : {}),
     ...(field.checkboxValue !== undefined
       ? { checkboxValue: field.checkboxValue }
@@ -460,6 +461,7 @@ export function classifyPage(raw: RawPageRepresentation) {
     ...(field.formId ? { formId: field.formId } : {}),
     ...(field.selector ? { selector: field.selector } : {}),
     source: field.source,
+    ...(field.semanticType ? { semanticType: field.semanticType } : {}),
   }));
   for (const rawField of applicationAnswerFields(raw.fields)) {
     const label = `${rawField.label} ${rawField.name ?? ''}`.toLowerCase();

@@ -48,6 +48,7 @@ export class BrowserSessionManager {
   async create(
     navigationGuard?: (url: string) => void,
     readOnlyRequestGuard?: ReadOnlyRequestGuard,
+    frameNavigationGuard?: (url: string) => boolean,
   ): Promise<BrowserSession> {
     let browser: Browser;
     try {
@@ -100,7 +101,11 @@ export class BrowserSessionManager {
           }
           if (request.isNavigationRequest()) {
             this.policy.validateNavigation(request.url());
-            navigationGuard?.(request.url());
+            if (
+              request.frame() === page.mainFrame() ||
+              !frameNavigationGuard?.(request.url())
+            )
+              navigationGuard?.(request.url());
           }
           await this.policy.validateAddress(request.url());
           if (
@@ -197,7 +202,11 @@ export class BrowserSessionManager {
               ) {
                 const target = new URL(location, response.url()).href;
                 this.policy.validateNavigation(target);
-                navigationGuard?.(target);
+                if (
+                  response.request().frame() === page.mainFrame() ||
+                  !frameNavigationGuard?.(target)
+                )
+                  navigationGuard?.(target);
               }
               let count = 0;
               for (
@@ -206,7 +215,11 @@ export class BrowserSessionManager {
                 request = request.redirectedFrom()!
               ) {
                 this.policy.validateNavigation(request.url());
-                navigationGuard?.(request.url());
+                if (
+                  request.frame() === page.mainFrame() ||
+                  !frameNavigationGuard?.(request.url())
+                )
+                  navigationGuard?.(request.url());
                 if (++count > 20)
                   throw new InspectionError(
                     'TOO_MANY_REDIRECTS',

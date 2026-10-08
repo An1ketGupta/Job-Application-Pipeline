@@ -14,6 +14,13 @@ import { BrowserSessionManager } from './session.js';
 import { waitForFormRendering } from './form-readiness.js';
 import { captureAshbySubmission } from './ashby-form.js';
 import {
+  isGreenhouseTelemetry,
+  isGreenhouseFrame,
+  readGreenhousePosting,
+  captureGreenhouseForm,
+  greenhousePostingFromHtml,
+} from './greenhouse-form.js';
+import {
   isAshbyReadRequest,
   isOptionalAshbyTelemetry,
 } from './ashby-read-request.js';
@@ -85,7 +92,8 @@ export class ApplicationInspector {
             }
           : undefined,
         (url, method, body, contentType) =>
-          isOptionalAshbyTelemetry(sourceUrl, url, method)
+          isOptionalAshbyTelemetry(sourceUrl, url, method) ||
+          isGreenhouseTelemetry(sourceUrl, url, method)
             ? 'BLOCK_OPTIONAL'
             : isAshbyReadRequest(
                 target?.fixtureSourceUrl ?? sourceUrl,
@@ -97,6 +105,7 @@ export class ApplicationInspector {
                   ? new URL(sourceUrl).origin
                   : undefined,
               ),
+        (url) => isGreenhouseFrame(sourceUrl, url),
       );
       const page = session.page;
       let ashbyPosting: unknown;
@@ -139,6 +148,11 @@ export class ApplicationInspector {
             }),
         );
         if (!redirectResponse.request().isNavigationRequest()) return;
+        if (
+          redirectResponse.request().frame() !== page.mainFrame() &&
+          isGreenhouseFrame(sourceUrl, redirectResponse.url())
+        )
+          return;
         if (redirectResponse.status() < 300 || redirectResponse.status() >= 400)
           return;
         const location = redirectResponse.headers()['location'];
@@ -209,6 +223,13 @@ export class ApplicationInspector {
         request = request.redirectedFrom()!;
       }
       validateRedirectChain(chain, this.sessions.networkPolicy);
+      const hostedGreenhousePosting =
+        target?.platform === 'GREENHOUSE'
+          ? greenhousePostingFromHtml(
+              await response.text(),
+              target.fixtureSourceUrl ?? sourceUrl,
+            )
+          : undefined;
       await waitForFormRendering(page, this.renderTimeoutMs);
       const finalUrl = page.url();
       this.sessions.networkPolicy.validateNavigation(finalUrl);
@@ -231,6 +252,19 @@ export class ApplicationInspector {
       ]).finally(() => clearTimeout(extractionTimer));
       await Promise.all(addressChecks);
       if (unsafeConnection) throw unsafeConnection;
+      const greenhousePosting =
+        hostedGreenhousePosting ??
+        (await readGreenhousePosting(
+          page,
+          target?.fixtureSourceUrl ?? sourceUrl,
+        ));
+      const greenhouseSubmission = greenhousePosting
+        ? captureGreenhouseForm(
+            raw,
+            greenhousePosting,
+            target?.fixtureSourceUrl ?? sourceUrl,
+          )
+        : undefined;
       await session.securityCheck();
       if (!raw.title && !raw.visibleText && raw.fields.length === 0)
         throw new InspectionError(
@@ -250,6 +284,18 @@ export class ApplicationInspector {
         }
       }
       const classified = classifyPage(raw);
+      if (
+        greenhouseSubmission &&
+        !/verify you are human|security challenge/i.test(raw.title)
+      ) {
+        // The hosted reCAPTCHA widget belongs to assisted submission. Inspecting
+        // candidate answers does not execute or solve that challenge.
+        classified.humanReview.reasons = classified.humanReview.reasons.filter(
+          (r) => r !== 'CAPTCHA',
+        );
+        classified.humanReview.required =
+          classified.humanReview.reasons.length > 0;
+      }
       if (target) {
         const approved = (url: string) =>
           target.fixtureSourceUrl
@@ -301,13 +347,14 @@ export class ApplicationInspector {
           const submission = captureAshbySubmission(ashbyPosting, raw.fields);
           return submission ? { ashbySubmission: submission } : {};
         })()),
+        ...(greenhouseSubmission ? { greenhouseSubmission } : {}),
         confidence: detected.confidence,
         inspectionMetadata: {
           inspectedAt: new Date().toISOString(),
           durationMs: Date.now() - started,
           visibleTextExcerpt: raw.visibleText,
           fieldCount: classified.fields.length,
-          formParserVersion: 3,
+          formParserVersion: greenhouseSubmission ? 5 : 4,
         },
       });
       return {
